@@ -1,10 +1,10 @@
 # BirdNET Detection Screening
 
-> **Evidence-based screening and human-in-the-loop validation of unusual BirdNET detections.**
+> **An evidence-based, human-in-the-loop framework for systematically assessing and prioritising unusual BirdNET-Go detections for further investigation and validation.**
 
 This project develops a reproducible workflow for prioritising BirdNET-Go detections using **taxonomic reconciliation, local species references, detection history, spatiotemporal evidence, and AI-assisted contextual assessment**.
 
-The framework is being developed for bird monitoring on **Cempedak and Nikoi Islands**, with the longer-term aim of supporting an operational screening layer between **BirdNET-Go** and **EarthRanger**.
+The framework is being developed for bird monitoring on **Cempedak and Nikoi Islands**, with the longer-term aim of supporting an operational screening layer **within the existing BirdNET-Go–EarthRanger workflow**.
 
 ---
 
@@ -20,7 +20,7 @@ The framework is being developed for bird monitoring on **Cempedak and Nikoi Isl
 | **eBird** | Adds supplementary occurrence evidence |
 | **Rule-based screening** | Generates reproducible evidence flags |
 | **AI assessment** | Interprets combined or conflicting evidence |
-| **Human review** | Provides final biological validation |
+| **Human review** | Provides final validation and review outcome |
 
 ---
 
@@ -56,11 +56,13 @@ flowchart TD
 
     F --> G[Deterministic Screening]
     G --> H[AI Contextual Assessment]
-    H --> I[Review Priority]
+    H --> I[Review Priority & Recommended Action]
 
-    I --> J[EarthRanger / Notification Routing]
-    J --> K[Human Acoustic Validation]
-    K --> L[Outcome Storage & Calibration]
+    I --> J[EarthRanger Event Enrichment]
+    J --> K[Reviewer Notification]
+    K --> L[Human Acoustic Validation]
+    L --> M[Validation Outcome]
+    M --> N[Outcome Storage & Calibration]
 ```
 
 ---
@@ -164,7 +166,7 @@ Detailed methodology is maintained separately:
 
 ## Development Roadmap
 
-### Phase 1 — Framework
+### Phase 1: Framework
 
 - [x] Define screening framework
 - [x] Document data-source roles
@@ -172,7 +174,7 @@ Detailed methodology is maintained separately:
 - [x] Define decision logic
 - [x] Define validation approach
 
-### Phase 2 — Local Reference & Taxonomy
+### Phase 2: Local Reference & Taxonomy
 
 - [ ] Ingest Cempedak and Nikoi local species reference
 - [ ] Preserve raw source names
@@ -180,7 +182,7 @@ Detailed methodology is maintained separately:
 - [ ] Resolve aliases, synonyms, and naming mismatches
 - [ ] Generate local-reference status
 
-### Phase 3 — Evidence Construction
+### Phase 3: Evidence Construction
 
 - [ ] Reproduce the existing BirdNET candidate-validation workflow
 - [ ] Add detection-history features
@@ -188,16 +190,17 @@ Detailed methodology is maintained separately:
 - [ ] Integrate eBird occurrence evidence
 - [ ] Generate structured evidence packets
 
-### Phase 4 — Screening
+### Phase 4: Screening
 
 - [ ] Implement deterministic screening baseline
 - [ ] Convert the original Tier logic into reproducible evidence rules
 - [ ] Prototype AI contextual assessment
 - [ ] Compare rule-based and AI-assisted screening
 
-### Phase 5 — Operational Integration
+### Phase 5: Operational Integration
 
 - [ ] Connect screening outputs with EarthRanger
+- [ ] Update or enrich EarthRanger events with screening results
 - [ ] Add reviewer notification workflow
 - [ ] Store human validation outcomes
 - [ ] Calibrate thresholds using validated records
@@ -206,7 +209,7 @@ Detailed methodology is maintained separately:
 
 ## Current Status
 
-**Framework complete — implementation beginning.**
+**Framework complete; implementation beginning.**
 
 Current development focus:
 
@@ -246,8 +249,12 @@ This allows the project to test whether AI adds meaningful value beyond transpar
 
 ## Overall Goal
 
-The goal is not to maximise AI usage.
+The overall goal is to develop a **reproducible screening layer within the existing BirdNET-Go–EarthRanger workflow** that can:
 
-The goal is to:
+- combine taxonomic, local, geographic, temporal, and occurrence evidence for each detection;
+- identify unusual or potentially significant records that warrant further investigation;
+- use AI to interpret combined or conflicting evidence without treating AI as the final species validator;
+- assign an appropriate review priority and recommended next action; and
+- record or enrich relevant detections in EarthRanger and notify human reviewers for further investigation and validation.
 
-> **direct human attention toward the right detections while remaining transparent, reproducible, and scientifically cautious.**
+> **The system is intended to automate screening and prioritisation, not biological confirmation.**
