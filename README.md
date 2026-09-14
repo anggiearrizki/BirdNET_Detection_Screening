@@ -2,7 +2,7 @@
 
 > **An evidence-based, human-in-the-loop framework for systematically assessing and prioritising unusual BirdNET-Go detections for further investigation and validation.**
 
-This project develops a reproducible workflow for prioritising BirdNET-Go detections using **taxonomic reconciliation, local species references, detection history, spatiotemporal evidence, and AI-assisted contextual assessment**.
+This project develops a reproducible workflow for **screening, validating, and monitoring BirdNET-Go detections** using **taxonomic reconciliation, local species references, detection history, spatiotemporal evidence, and AI-assisted contextual assessment**.
 
 The framework is being developed for bird monitoring on **Cempedak and Nikoi Islands**, with the longer-term aim of supporting an operational screening layer **within the existing BirdNET-Go–EarthRanger workflow**.
 
@@ -40,16 +40,17 @@ It is **not** designed to automatically determine whether a species is definitiv
 
 ---
 
-## Proposed Workflow
+## Overall System Design
 
 ```mermaid
 flowchart TD
     A[BirdNET-Go Detection] --> B[Taxonomic Reconciliation]
+
     B --> C[Local Species Reference Check]
     C --> D[Detection History Analysis]
 
     D --> E1[BirdNET GeoModel]
-    D --> E2[eBird Supplementary Evidence]
+    D --> E2[External Occurrence Evidence]
 
     E1 --> F[Structured Evidence Packet]
     E2 --> F
@@ -59,10 +60,34 @@ flowchart TD
     H --> I[Review Priority & Recommended Action]
 
     I --> J[EarthRanger Event Enrichment]
-    J --> K[Reviewer Notification]
+    J --> K[Reviewer / Expert Notification]
     K --> L[Human Acoustic Validation]
+
     L --> M[Validation Outcome]
-    M --> N[Outcome Storage & Calibration]
+
+    M --> M1[Confirmed]
+    M --> M2[Rejected]
+    M --> M3[Unresolved]
+
+    M1 --> N1[Validated Detection Dataset]
+
+    M1 --> N2[Validation Outcome Store]
+    M2 --> N2
+    M3 --> N2
+
+    N2 --> Q[Evaluation & Calibration]
+
+    N1 --> O[Monitoring & Trend Analytics]
+
+    O --> O1[Temporal Trends]
+    O --> O2[Species Occurrence Patterns]
+    O --> O3[Station-Level Patterns]
+    O --> O4[Environmental Context]
+
+    O1 --> P[Visualisation & Conservation Reporting]
+    O2 --> P
+    O3 --> P
+    O4 --> P
 ```
 
 ---
@@ -144,8 +169,10 @@ src/
 ├── evidence/           # Detection history, GeoModel, eBird
 ├── screening/          # Deterministic screening logic
 ├── ai/                 # Contextual AI assessment
-├── routing/            # EarthRanger / notification integration
-└── validation/         # Human outcomes and feedback
+├── routing/            # EarthRanger / reviewer notification
+├── validation/         # Human outcomes and feedback
+├── analytics/          # Longitudinal and trend analysis
+└── reporting/          # Visualisation and conservation outputs
 ```
 
 ---
@@ -205,11 +232,29 @@ Detailed methodology is maintained separately:
 - [ ] Store human validation outcomes
 - [ ] Calibrate thresholds using validated records
 
+### Phase 6: Monitoring & Trend Analytics
+
+- [ ] Build a validated longitudinal detection dataset
+- [ ] Analyse detection activity across species, stations, and time
+- [ ] Account for recording effort where possible
+- [ ] Examine temporal and seasonal patterns
+- [ ] Assess spatial and station-level detection patterns
+- [ ] Incorporate relevant environmental context
+- [ ] Evaluate which indicators are suitable for longer-term monitoring
+
+### Phase 7: Visualisation & Conservation Reporting
+
+- [ ] Develop interpretable monitoring visualisations
+- [ ] Communicate confidence and supporting evidence alongside trends
+- [ ] Distinguish detection activity from population inference
+- [ ] Develop conservation-relevant indicators
+- [ ] Relate monitoring outputs to Cempedak and Nikoi conservation objectives
+
 ---
 
 ## Current Status
 
-**Framework complete; implementation beginning.**
+**Core screening framework defined; implementation beginning.**
 
 Current development focus:
 
@@ -249,12 +294,13 @@ This allows the project to test whether AI adds meaningful value beyond transpar
 
 ## Overall Goal
 
-The overall goal is to develop a **reproducible screening layer within the existing BirdNET-Go–EarthRanger workflow** that can:
+The overall goal is to develop a **reproducible, human-in-the-loop workflow built around the existing BirdNET-Go–EarthRanger pipeline** that can:
 
 - combine taxonomic, local, geographic, temporal, and occurrence evidence for each detection;
 - identify unusual or potentially significant records that warrant further investigation;
 - use AI to interpret combined or conflicting evidence without treating AI as the final species validator;
-- assign an appropriate review priority and recommended next action; and
-- record or enrich relevant detections in EarthRanger and notify human reviewers for further investigation and validation.
+- assign an appropriate review priority and recommended next action;
+- record or enrich relevant detections in EarthRanger and notify human reviewers for further investigation and validation; and
+- use confirmed, quality-controlled detection outcomes to support longer-term monitoring, trend analysis, and conservation reporting.
 
 > **The system is intended to automate screening and prioritisation, not biological confirmation.**
