@@ -309,22 +309,33 @@ def parse_simple(
         if not is_record_number(record_id):
             continue
 
+        common_name_raw = get_cell(
+            df,
+            row,
+            config["common_name_col"],
+        )
+
+        scientific_name_raw = get_cell(
+            df,
+            row,
+            config["scientific_name_col"],
+        )
+
+        # Skip numbered source rows that contain no biodiversity identification.
+        if (
+            normalize_text(common_name_raw) is None
+            and normalize_text(scientific_name_raw) is None
+        ):
+            continue
+
         records.append(
             build_record(
                 sheet_name=sheet_name,
                 source_row=row + 1,
                 parser_type=config["parser"],
                 record_id=record_id,
-                common_name_raw=get_cell(
-                    df,
-                    row,
-                    config["common_name_col"],
-                ),
-                scientific_name_raw=get_cell(
-                    df,
-                    row,
-                    config["scientific_name_col"],
-                ),
+                common_name_raw=common_name_raw,
+                scientific_name_raw=scientific_name_raw,
                 status_raw=get_cell(
                     df,
                     row,
