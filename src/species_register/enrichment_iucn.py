@@ -957,6 +957,13 @@ def main():
     # ========================================================
     # SAVE ENRICHED REGISTER
     # ========================================================
+    # Display fallback for records without an available IUCN assessment.
+    # This is not an official IUCN category.
+    register["iucn_status"] = (
+        register["iucn_status"]
+        .fillna("Status Not Available")
+        .replace("", "Status Not Available")
+    )
 
     register.to_csv(
         OUTPUT_CSV,
