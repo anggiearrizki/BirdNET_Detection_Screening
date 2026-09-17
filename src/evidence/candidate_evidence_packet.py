@@ -2,10 +2,10 @@
 
 The reconciled Phase 2 biodiversity reference is the baseline Species Register.
 
-A candidate may arrive from BirdNET, EarthRanger, a camera trap, field survey,
-manual observation, or another monitoring workflow.
+A candidate may arrive from BirdNET, a camera trap, field survey, manual
+observation, or another monitoring workflow.
 
-Workflow:
+Current workflow:
 
     candidate
         ↓
@@ -13,17 +13,24 @@ Workflow:
         ↓
     Species Register check
         ↓
-    supporting evidence
+    if already registered:
+        no new species entry required
         ↓
-    specialist evidence
+    if not registered:
+        supporting evidence
         ↓
-    conservation context
+        taxon-specific specialist evidence
         ↓
-    human review
+        conservation context
+        ↓
+        later screening and human review
+        ↓
+        EarthRanger operational workflow
 
 Important:
 - taxonomy establishes identity, not biological presence;
 - the Species Register is not a sightings database;
+- BirdNET confidence is not probability of biological presence;
 - external evidence provides supporting context only;
 - absence from a database does not demonstrate biological absence;
 - confirmed additions occur only after later human review.
@@ -35,9 +42,10 @@ from candidate_taxonomy import resolve_candidate_taxonomy
 from local_ref_lookup import lookup_local_reference
 from evidence_source_router import get_evidence_profile
 from gbif_occurrence import get_gbif_occurrence_evidence
+from birdnet_evidence import build_birdnet_evidence
 
 
-CANDIDATE_PACKET_VERSION = "0.2"
+CANDIDATE_PACKET_VERSION = "0.3"
 
 
 def initialise_specialist_evidence(
@@ -101,6 +109,7 @@ def build_candidate_evidence_packet(
     source_record_id=None,
     source_reference=None,
     country_code="ID",
+    birdnet_data=None,
 ):
     """Build an evidence packet for a potential Species Register addition."""
 
@@ -199,9 +208,11 @@ def build_candidate_evidence_packet(
             "evidence_collection_status":
                 "blocked_by_taxonomy",
 
-            "supporting_evidence": {},
+            "supporting_evidence":
+                {},
 
-            "specialist_evidence": {},
+            "specialist_evidence":
+                {},
 
             "conservation_context": {
                 "iucn":
@@ -303,7 +314,7 @@ def build_candidate_evidence_packet(
     # ---------------------------------------------------------------------
     # 7. Generic supporting evidence
     #
-    # Only needed automatically for candidate-new taxa.
+    # Only automatically retrieve it for candidate-new taxa.
     # ---------------------------------------------------------------------
 
     if already_in_register:
@@ -329,7 +340,7 @@ def build_candidate_evidence_packet(
         )
 
     # ---------------------------------------------------------------------
-    # 8. Prepare specialist evidence slots
+    # 8. Prepare specialist evidence
     # ---------------------------------------------------------------------
 
     if already_in_register:
@@ -343,6 +354,84 @@ def build_candidate_evidence_packet(
                 evidence_profile=profile_name,
             )
         )
+
+        # -----------------------------------------------------------------
+        # BirdNET evidence
+        #
+        # Only relevant when the candidate is a bird and BirdNET data
+        # have actually been supplied by the upstream integration.
+        # -----------------------------------------------------------------
+
+        if (
+            profile_name == "birds"
+            and birdnet_data is not None
+        ):
+
+            specialist_evidence[
+                "birdnet_history"
+            ] = build_birdnet_evidence(
+                scientific_name=(
+                    accepted_scientific_name
+                ),
+
+                common_name=(
+                    common_name
+                ),
+
+                detection_confidence=(
+                    birdnet_data.get(
+                        "detection_confidence"
+                    )
+                ),
+
+                detection_datetime=(
+                    birdnet_data.get(
+                        "detection_datetime"
+                    )
+                ),
+
+                station_id=(
+                    birdnet_data.get(
+                        "station_id"
+                    )
+                ),
+
+                audio_reference=(
+                    birdnet_data.get(
+                        "audio_reference"
+                    )
+                ),
+
+                historical_detection_count=(
+                    birdnet_data.get(
+                        "historical_detection_count"
+                    )
+                ),
+
+                historical_avg_confidence=(
+                    birdnet_data.get(
+                        "historical_avg_confidence"
+                    )
+                ),
+
+                historical_max_confidence=(
+                    birdnet_data.get(
+                        "historical_max_confidence"
+                    )
+                ),
+
+                first_detected=(
+                    birdnet_data.get(
+                        "first_detected"
+                    )
+                ),
+
+                last_detected=(
+                    birdnet_data.get(
+                        "last_detected"
+                    )
+                ),
+            )
 
     # ---------------------------------------------------------------------
     # 9. Build candidate evidence packet
@@ -378,7 +467,7 @@ def build_candidate_evidence_packet(
         },
 
         # -----------------------------------------------------------------
-        # Name supplied by the source system
+        # Taxon information as supplied by upstream source
         # -----------------------------------------------------------------
 
         "input_taxon": {
@@ -396,7 +485,7 @@ def build_candidate_evidence_packet(
         },
 
         # -----------------------------------------------------------------
-        # Resolved accepted taxonomy
+        # Taxonomy reconciliation result
         # -----------------------------------------------------------------
 
         "taxonomy":
@@ -417,7 +506,7 @@ def build_candidate_evidence_packet(
         },
 
         # -----------------------------------------------------------------
-        # Property context
+        # Property
         # -----------------------------------------------------------------
 
         "property": {
@@ -453,7 +542,7 @@ def build_candidate_evidence_packet(
             local_reference,
 
         # -----------------------------------------------------------------
-        # Supporting evidence routing
+        # Evidence routing
         # -----------------------------------------------------------------
 
         "evidence_profile":
@@ -480,6 +569,8 @@ def build_candidate_evidence_packet(
 
         # -----------------------------------------------------------------
         # Conservation context
+        #
+        # IUCN will be attached here later.
         # -----------------------------------------------------------------
 
         "conservation_context": {
@@ -488,7 +579,7 @@ def build_candidate_evidence_packet(
         },
 
         # -----------------------------------------------------------------
-        # Phase 4 review fields
+        # Phase 4 review
         # -----------------------------------------------------------------
 
         "review": {
@@ -605,7 +696,9 @@ def print_candidate_packet(packet):
 
     print("\nTAXONOMY RESOLUTION")
 
-    taxonomy = packet["taxonomy"]
+    taxonomy = packet[
+        "taxonomy"
+    ]
 
     print(
         f"Status: "
@@ -742,7 +835,7 @@ def print_candidate_packet(packet):
         )
 
     # ---------------------------------------------------------------------
-    # Generic evidence
+    # Generic supporting evidence
     # ---------------------------------------------------------------------
 
     print("\nSUPPORTING EVIDENCE")
@@ -785,7 +878,14 @@ def print_candidate_packet(packet):
         "specialist_evidence"
     ]
 
-    if specialist:
+    if not specialist:
+
+        print(
+            "Not required for a new "
+            "Species Register entry."
+        )
+
+    else:
 
         for source_name, value in (
             specialist.items()
@@ -802,12 +902,53 @@ def print_candidate_packet(packet):
                 f"{status}"
             )
 
-    else:
+        # -------------------------------------------------------------
+        # BirdNET summary when populated
+        # -------------------------------------------------------------
 
-        print(
-            "Not required for a new "
-            "Species Register entry."
+        birdnet = specialist.get(
+            "birdnet_history"
         )
+
+        if birdnet is not None:
+
+            history = birdnet[
+                "history"
+            ]
+
+            print(
+                "\nBirdNET history summary:"
+            )
+
+            print(
+                f"  Status: "
+                f"{history['status']}"
+            )
+
+            print(
+                f"  Detection count: "
+                f"{history['detection_count']}"
+            )
+
+            print(
+                f"  Average confidence: "
+                f"{history['average_confidence']}"
+            )
+
+            print(
+                f"  Maximum confidence: "
+                f"{history['maximum_confidence']}"
+            )
+
+            print(
+                f"  First detected: "
+                f"{history['first_detected']}"
+            )
+
+            print(
+                f"  Last detected: "
+                f"{history['last_detected']}"
+            )
 
     # ---------------------------------------------------------------------
     # Conservation
@@ -833,10 +974,10 @@ def print_candidate_packet(packet):
 
 def main():
 
-    # Real candidate-new-species example.
+    # Real candidate workflow test.
     #
-    # Notice that accepted taxonomy is NOT supplied manually.
-    # The candidate taxonomy resolver now provides it.
+    # BirdNET is the upstream detection source.
+    # EarthRanger remains downstream for operational review.
 
     packet = build_candidate_evidence_packet(
         common_name=(
@@ -855,16 +996,41 @@ def main():
 
         environment="terrestrial",
 
-        candidate_source="EarthRanger",
+        candidate_source="BirdNET",
 
-        source_record_id=(
-            "f46bc890-bb7a-4fd9-81e7-0ea7d4f75aaa"
-        ),
+        birdnet_data={
+            # We do not currently have the individual triggering
+            # detection details, so those remain unset.
 
-        source_reference=(
-            "https://bintan.pamdas.org/events/"
-            "f46bc890-bb7a-4fd9-81e7-0ea7d4f75aaa"
-        ),
+            "detection_confidence":
+                None,
+
+            "detection_datetime":
+                None,
+
+            "station_id":
+                None,
+
+            "audio_reference":
+                None,
+
+            # Historical summary from the BirdNET species export.
+
+            "historical_detection_count":
+                2,
+
+            "historical_avg_confidence":
+                0.915,
+
+            "historical_max_confidence":
+                0.94,
+
+            "first_detected":
+                "2026-09-07 18:01:59",
+
+            "last_detected":
+                "2026-09-08 14:03:54",
+        },
     )
 
     print_candidate_packet(
