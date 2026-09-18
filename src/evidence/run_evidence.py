@@ -7,6 +7,25 @@ In production, this dictionary would be populated automatically by
 the BirdNET integration rather than entered manually.
 """
 
+from pathlib import Path
+import sys
+
+
+# Add src/ to the Python path so modules outside this folder
+# can be imported during the prototype.
+SRC_DIR = Path(__file__).resolve().parents[1]
+
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(
+        0,
+        str(SRC_DIR),
+    )
+
+
+from ai.gemini_prompt import (
+    print_prompt_preview,
+)
+
 from candidate_evidence_packet import (
     build_candidate_evidence_packet,
     print_candidate_packet,
@@ -112,6 +131,12 @@ def main():
     )
 
     print_candidate_packet(
+        packet
+    )
+
+    print()
+
+    print_prompt_preview(
         packet
     )
 
