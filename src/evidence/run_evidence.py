@@ -26,6 +26,11 @@ from ai.gemini_prompt import (
     print_prompt_preview,
 )
 
+from integration.earthranger_event_mapper import (
+    build_earthranger_event_preview,
+    print_earthranger_event_preview,
+)
+
 from candidate_evidence_packet import (
     build_candidate_evidence_packet,
     print_candidate_packet,
@@ -140,6 +145,60 @@ def main():
         packet
     )
 
+    # Temporary Gemini result used to test the EarthRanger mapping.
+    #
+    # This is NOT a live Gemini response yet. It represents the structured
+    # output expected from the Gemini prompt-generation layer.
+
+    gemini_result = {
+        "summary": (
+            "Black-crowned Night Heron is not currently listed in the "
+            "Nikoi Species Register. Available supporting evidence warrants "
+            "human review but does not independently confirm local presence."
+        ),
+
+        "register_context": (
+            "Candidate new register taxon for Nikoi."
+        ),
+
+        "evidence_highlights": [
+            "Previous BirdNET detection history is available.",
+            "Regional GBIF occurrence records are available.",
+        ],
+
+        "uncertainties": [
+            "BirdNET confidence is not a probability of biological presence.",
+            "GeoModel and eBird evidence are not yet available.",
+            "Human acoustic validation is still required.",
+        ],
+
+        "review_recommendation":
+            "human_acoustic_review",
+
+        "suggested_priority":
+            "review",
+
+        "notification_text": (
+            "Black-crowned Night Heron detected on Nikoi. "
+            "Candidate new register species. "
+            "Human acoustic review recommended."
+        ),
+    }
+
+
+    earthranger_event = build_earthranger_event_preview(
+        candidate=incoming_candidate,
+        candidate_packet=packet,
+        gemini_result=gemini_result,
+    )
+
+    print()
+
+    print_earthranger_event_preview(
+        earthranger_event
+    )
+
 
 if __name__ == "__main__":
     main()
+    
