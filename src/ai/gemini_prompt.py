@@ -1,3 +1,10 @@
+"""Build the controlled prompt used for Gemini interpretation.
+
+The output JSON structure itself is enforced by the Gemini API client.
+This module focuses only on the scientific and operational instructions
+given to the model.
+"""
+
 import json
 
 
@@ -26,76 +33,66 @@ You must not:
 - describe a detection as definitively false solely because geographic
   or occurrence evidence is weak
 
-Human validation remains the final authority for confirming a new species record.
+Important interpretation rules:
+
+- Taxonomy establishes identity, not biological presence.
+- The Species Register represents the current property species list and is
+  not a sightings database.
+- A taxon not being listed in the Species Register does not imply absence.
+- External biodiversity records provide contextual evidence only.
+- Repeated BirdNET detections do not independently confirm presence.
+- Human validation remains the final authority for confirming a new species record.
 
 The EarthRanger notification must remain concise.
 Detailed evidence and audio should remain within the EarthRanger event.
-
-Return valid JSON only.
 """.strip()
 
 
-OUTPUT_SCHEMA = {
-    "summary": "Brief interpretation of the detection.",
-    "register_context": (
-        "Explain whether the taxon is already registered for the relevant property."
-    ),
-    "evidence_highlights": [
-        "Important supporting or conflicting evidence."
-    ],
-    "uncertainties": [
-        "Important limitation, missing evidence, or uncertainty."
-    ],
-    "review_recommendation": "Recommended human review action.",
-    "suggested_priority": "routine | review | priority_review",
-    "notification_text": (
-        "A short interpretation suitable for an EarthRanger notification."
-    ),
-}
-
-
-def build_gemini_prompt(candidate_packet):
-    """
-    Build a controlled prompt from the candidate evidence packet.
-
-    Future workflow:
-    BirdNET-Go webhook
-        -> candidate evidence packet
-        -> Gemini prompt
-        -> Gemini interpretation
-        -> existing EarthRanger event
-    """
+def build_gemini_prompt(
+    candidate_packet,
+):
+    """Build the evidence interpretation prompt sent to Gemini."""
 
     task = """
-Analyse the candidate detection represented by the evidence packet.
+Analyse the candidate detection represented by the evidence packet below.
 
-Focus on:
-1. Species Register context.
-2. Relevant supporting or conflicting evidence.
-3. Important uncertainty or missing information.
-4. Whether human review is warranted.
-5. The appropriate operational review priority.
-6. A concise EarthRanger notification.
+Your response should:
+
+1. Summarise the candidate detection conservatively.
+2. Explain its Species Register context.
+3. Highlight the most relevant supporting or conflicting evidence.
+4. Identify important uncertainty or missing evidence.
+5. Recommend the appropriate human review action.
+6. Suggest an operational priority:
+   routine, review, or priority_review.
+7. Produce a concise EarthRanger notification.
+
+Do not make a biological confirmation or rejection.
+
+If evidence is incomplete, explicitly state the limitation rather than
+filling the gap with assumptions.
 
 The notification should contain only the key interpretation and recommended
-action. Detailed evidence and audio will remain available within the
-EarthRanger event.
+action. Detailed evidence and audio remain within the EarthRanger event.
 """.strip()
 
     return (
         f"{SYSTEM_INSTRUCTION}\n\n"
-        f"TASK\n{task}\n\n"
-        f"REQUIRED OUTPUT SCHEMA\n"
-        f"{json.dumps(OUTPUT_SCHEMA, indent=2)}\n\n"
+        f"TASK\n"
+        f"{task}\n\n"
         f"CANDIDATE EVIDENCE PACKET\n"
         f"{json.dumps(candidate_packet, indent=2, default=str)}"
     )
 
 
-def print_prompt_preview(candidate_packet):
+def print_prompt_preview(
+    candidate_packet,
+):
     """Print the generated Gemini prompt during prototyping."""
 
-    prompt = build_gemini_prompt(candidate_packet)
+    prompt = build_gemini_prompt(
+        candidate_packet
+    )
 
     print("=" * 70)
     print("GEMINI PROMPT PREVIEW")

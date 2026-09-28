@@ -23,7 +23,12 @@ if str(SRC_DIR) not in sys.path:
 
 
 from ai.gemini_prompt import (
+    build_gemini_prompt,
     print_prompt_preview,
+)
+
+from ai.gemini_client import (
+    run_gemini_interpretation,
 )
 
 from ai.gemini_response import (
@@ -93,8 +98,10 @@ def main():
 
     # Simulation only.
     #
-    # In production this payload will come from BirdNET-Go /
-    # the integration layer automatically.
+    # The upstream candidate is still entered manually while
+    # BirdNET-Go integration is unavailable.
+    #
+    # Gemini interpretation below is LIVE.
 
     incoming_candidate = {
         "candidate_source":
@@ -151,66 +158,33 @@ def main():
     print()
 
     # ---------------------------------------------------------
-    # 2. Generate Gemini-ready prompt
+    # 2. Build Gemini prompt
     # ---------------------------------------------------------
 
     print_prompt_preview(
         packet
     )
 
+    prompt = build_gemini_prompt(
+        packet
+    )
+
+    # ---------------------------------------------------------
+    # 3. LIVE Gemini interpretation
+    # ---------------------------------------------------------
+
     print()
+    print("=" * 70)
+    print("LIVE GEMINI INTERPRETATION")
+    print("=" * 70)
+    print("Sending structured evidence packet to Gemini...")
 
-    # ---------------------------------------------------------
-    # 3. Simulated Gemini result
-    # ---------------------------------------------------------
-    #
-    # This is NOT a live Gemini response yet.
-    #
-    # It represents the structured response expected from the
-    # Gemini interpretation layer so that downstream validation
-    # and EarthRanger mapping can be tested safely.
+    gemini_result = run_gemini_interpretation(
+        prompt
+    )
 
-    gemini_result = {
-        "summary": (
-            "Black-crowned Night Heron is not currently listed in the "
-            "Nikoi Species Register. Available supporting evidence warrants "
-            "human review but does not independently confirm local presence."
-        ),
-
-        "register_context": (
-            "Candidate new register taxon for Nikoi."
-        ),
-
-        "evidence_highlights": [
-            "Previous BirdNET detection history is available.",
-            "Regional GBIF occurrence records are available.",
-        ],
-
-        "uncertainties": [
-            (
-                "BirdNET confidence is not a probability "
-                "of biological presence."
-            ),
-            (
-                "GeoModel and eBird evidence are not yet available."
-            ),
-            (
-                "Human acoustic validation is still required."
-            ),
-        ],
-
-        "review_recommendation":
-            "human_acoustic_review",
-
-        "suggested_priority":
-            "review",
-
-        "notification_text": (
-            "Black-crowned Night Heron detected on Nikoi. "
-            "Candidate new register species. "
-            "Human acoustic review recommended."
-        ),
-    }
+    print("Gemini response received.")
+    print("=" * 70)
 
     # ---------------------------------------------------------
     # 4. Validate Gemini structured output
