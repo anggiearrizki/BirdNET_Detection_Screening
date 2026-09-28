@@ -26,6 +26,11 @@ from ai.gemini_prompt import (
     print_prompt_preview,
 )
 
+from ai.gemini_response import (
+    validate_gemini_response,
+    print_gemini_validation_summary,
+)
+
 from integration.earthranger_event_mapper import (
     build_earthranger_event_preview,
     print_earthranger_event_preview,
@@ -131,6 +136,10 @@ def main():
         },
     }
 
+    # ---------------------------------------------------------
+    # 1. Build candidate evidence packet
+    # ---------------------------------------------------------
+
     packet = process_candidate(
         incoming_candidate
     )
@@ -141,14 +150,25 @@ def main():
 
     print()
 
+    # ---------------------------------------------------------
+    # 2. Generate Gemini-ready prompt
+    # ---------------------------------------------------------
+
     print_prompt_preview(
         packet
     )
 
-    # Temporary Gemini result used to test the EarthRanger mapping.
+    print()
+
+    # ---------------------------------------------------------
+    # 3. Simulated Gemini result
+    # ---------------------------------------------------------
     #
-    # This is NOT a live Gemini response yet. It represents the structured
-    # output expected from the Gemini prompt-generation layer.
+    # This is NOT a live Gemini response yet.
+    #
+    # It represents the structured response expected from the
+    # Gemini interpretation layer so that downstream validation
+    # and EarthRanger mapping can be tested safely.
 
     gemini_result = {
         "summary": (
@@ -167,9 +187,16 @@ def main():
         ],
 
         "uncertainties": [
-            "BirdNET confidence is not a probability of biological presence.",
-            "GeoModel and eBird evidence are not yet available.",
-            "Human acoustic validation is still required.",
+            (
+                "BirdNET confidence is not a probability "
+                "of biological presence."
+            ),
+            (
+                "GeoModel and eBird evidence are not yet available."
+            ),
+            (
+                "Human acoustic validation is still required."
+            ),
         ],
 
         "review_recommendation":
@@ -185,11 +212,28 @@ def main():
         ),
     }
 
+    # ---------------------------------------------------------
+    # 4. Validate Gemini structured output
+    # ---------------------------------------------------------
+
+    validated_gemini_result = validate_gemini_response(
+        gemini_result
+    )
+
+    print()
+
+    print_gemini_validation_summary(
+        validated_gemini_result
+    )
+
+    # ---------------------------------------------------------
+    # 5. Map validated result to existing EarthRanger event
+    # ---------------------------------------------------------
 
     earthranger_event = build_earthranger_event_preview(
         candidate=incoming_candidate,
         candidate_packet=packet,
-        gemini_result=gemini_result,
+        gemini_result=validated_gemini_result,
     )
 
     print()
@@ -201,4 +245,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
