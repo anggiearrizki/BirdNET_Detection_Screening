@@ -1,10 +1,25 @@
-"""Validate structured Gemini output before EarthRanger mapping.
+"""Validate structured Gemini screening output.
 
-Gemini is used as a contextual interpretation layer only.
+This validation layer sits between Gemini and downstream integrations
+such as BirdNET-Go and EarthRanger.
 
-Its response must match the expected structure before any values are
-passed downstream to EarthRanger.
+Gemini is an interpretation layer only. A structurally valid response
+does not itself confirm or reject biological presence.
 """
+
+
+ALLOWED_AUDIO_ASSESSMENTS = {
+    "consistent",
+    "inconsistent",
+    "uncertain",
+}
+
+
+ALLOWED_RECOMMENDED_STATUSES = {
+    "correct",
+    "false_positive",
+    "review_required",
+}
 
 
 ALLOWED_PRIORITIES = {
@@ -14,30 +29,15 @@ ALLOWED_PRIORITIES = {
 }
 
 
-REQUIRED_FIELDS = {
-    "summary",
-    "register_context",
-    "evidence_highlights",
-    "uncertainties",
-    "review_recommendation",
-    "suggested_priority",
-    "notification_text",
-}
-
-
 class GeminiResponseValidationError(ValueError):
-    """Raised when Gemini output does not match the expected structure."""
+    """Raised when Gemini output does not meet the required schema."""
 
 
-def _require_non_empty_string(
-    data,
+def _clean_string(
+    value,
     field_name,
 ):
-    """Require a field to contain a non-empty string."""
-
-    value = data.get(
-        field_name
-    )
+    """Validate and clean a required string field."""
 
     if not isinstance(
         value,
@@ -51,21 +51,17 @@ def _require_non_empty_string(
 
     if not value:
         raise GeminiResponseValidationError(
-            f"{field_name} must not be empty."
+            f"{field_name} cannot be empty."
         )
 
     return value
 
 
-def _require_string_list(
-    data,
+def _clean_string_list(
+    value,
     field_name,
 ):
-    """Require a field to contain a list of non-empty strings."""
-
-    value = data.get(
-        field_name
-    )
+    """Validate a list containing non-empty strings."""
 
     if not isinstance(
         value,
@@ -75,44 +71,32 @@ def _require_string_list(
             f"{field_name} must be a list."
         )
 
-    cleaned_values = []
+    cleaned = []
 
-    for index, item in enumerate(
-        value
-    ):
+    for item in value:
+
         if not isinstance(
             item,
             str,
         ):
             raise GeminiResponseValidationError(
-                f"{field_name}[{index}] must be a string."
+                f"Every item in {field_name} must be a string."
             )
 
         item = item.strip()
 
-        if not item:
-            raise GeminiResponseValidationError(
-                f"{field_name}[{index}] must not be empty."
+        if item:
+            cleaned.append(
+                item
             )
 
-        cleaned_values.append(
-            item
-        )
-
-    return cleaned_values
+    return cleaned
 
 
 def validate_gemini_response(
     response,
 ):
-    """
-    Validate and normalise structured Gemini output.
-
-    Returns a cleaned dictionary if valid.
-
-    Raises GeminiResponseValidationError if the response is unsafe
-    or structurally incompatible with the downstream workflow.
-    """
+    """Validate and normalise Gemini structured output."""
 
     if not isinstance(
         response,
@@ -122,80 +106,124 @@ def validate_gemini_response(
             "Gemini response must be a dictionary."
         )
 
-    missing_fields = (
-        REQUIRED_FIELDS
-        - set(
-            response.keys()
-        )
-    )
-
-    if missing_fields:
-        raise GeminiResponseValidationError(
-            "Gemini response is missing required fields: "
-            + ", ".join(
-                sorted(
-                    missing_fields
-                )
-            )
-        )
-
-    summary = _require_non_empty_string(
-        response,
+    summary = _clean_string(
+        response.get(
+            "summary"
+        ),
         "summary",
     )
 
-    register_context = _require_non_empty_string(
-        response,
+    register_context = _clean_string(
+        response.get(
+            "register_context"
+        ),
         "register_context",
     )
 
-    evidence_highlights = _require_string_list(
-        response,
+    audio_assessment = _clean_string(
+        response.get(
+            "audio_assessment"
+        ),
+        "audio_assessment",
+    ).lower()
+
+    if (
+        audio_assessment
+        not in ALLOWED_AUDIO_ASSESSMENTS
+    ):
+        raise GeminiResponseValidationError(
+            "audio_assessment must be one of: "
+            "consistent, inconsistent, uncertain."
+        )
+
+    audio_evidence = _clean_string(
+        response.get(
+            "audio_evidence"
+        ),
+        "audio_evidence",
+    )
+
+    evidence_highlights = _clean_string_list(
+        response.get(
+            "evidence_highlights"
+        ),
         "evidence_highlights",
     )
 
-    uncertainties = _require_string_list(
-        response,
+    uncertainties = _clean_string_list(
+        response.get(
+            "uncertainties"
+        ),
         "uncertainties",
     )
 
-    review_recommendation = _require_non_empty_string(
-        response,
+    recommended_status = _clean_string(
+        response.get(
+            "recommended_status"
+        ),
+        "recommended_status",
+    ).lower()
+
+    if (
+        recommended_status
+        not in ALLOWED_RECOMMENDED_STATUSES
+    ):
+        raise GeminiResponseValidationError(
+            "recommended_status must be one of: "
+            "correct, false_positive, review_required."
+        )
+
+    review_recommendation = _clean_string(
+        response.get(
+            "review_recommendation"
+        ),
         "review_recommendation",
     )
 
-    suggested_priority = _require_non_empty_string(
-        response,
+    suggested_priority = _clean_string(
+        response.get(
+            "suggested_priority"
+        ),
         "suggested_priority",
     ).lower()
 
-    notification_text = _require_non_empty_string(
-        response,
+    if (
+        suggested_priority
+        not in ALLOWED_PRIORITIES
+    ):
+        raise GeminiResponseValidationError(
+            "suggested_priority must be one of: "
+            "routine, review, priority_review."
+        )
+
+    notification_text = _clean_string(
+        response.get(
+            "notification_text"
+        ),
         "notification_text",
     )
 
-    if suggested_priority not in ALLOWED_PRIORITIES:
-        raise GeminiResponseValidationError(
-            "suggested_priority must be one of: "
-            + ", ".join(
-                sorted(
-                    ALLOWED_PRIORITIES
-                )
-            )
-        )
-
-    validated_response = {
+    validated = {
         "summary":
             summary,
 
         "register_context":
             register_context,
 
+        "audio_assessment":
+            audio_assessment,
+
+        "audio_evidence":
+            audio_evidence,
+
         "evidence_highlights":
             evidence_highlights,
 
         "uncertainties":
             uncertainties,
+
+        "recommended_status":
+            recommended_status,
 
         "review_recommendation":
             review_recommendation,
@@ -207,13 +235,13 @@ def validate_gemini_response(
             notification_text,
     }
 
-    return validated_response
+    return validated
 
 
 def print_gemini_validation_summary(
     validated_response,
 ):
-    """Print a concise validation result during prototyping."""
+    """Print a concise summary of validated Gemini output."""
 
     print("=" * 70)
     print("GEMINI RESPONSE VALIDATION")
@@ -224,34 +252,50 @@ def print_gemini_validation_summary(
     )
 
     print(
+        "Audio assessment:",
+        validated_response.get(
+            "audio_assessment"
+        ),
+    )
+
+    print(
+        "Recommended BirdNET status:",
+        validated_response.get(
+            "recommended_status"
+        ),
+    )
+
+    print(
         "Suggested priority:",
-        validated_response[
+        validated_response.get(
             "suggested_priority"
-        ],
+        ),
     )
 
     print(
         "Review recommendation:",
-        validated_response[
+        validated_response.get(
             "review_recommendation"
-        ],
+        ),
     )
 
     print(
         "Evidence highlights:",
         len(
-            validated_response[
-                "evidence_highlights"
-            ]
+            validated_response.get(
+                "evidence_highlights",
+                [],
+            )
         ),
     )
 
     print(
         "Uncertainties:",
         len(
-            validated_response[
-                "uncertainties"
-            ]
+            validated_response.get(
+                "uncertainties",
+                [],
+            )
         ),
     )
 

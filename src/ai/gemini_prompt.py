@@ -43,8 +43,45 @@ Important interpretation rules:
 - Repeated BirdNET detections do not independently confirm presence.
 - Human validation remains the final authority for confirming a new species record.
 
+CRITICAL EVIDENCE RULES:
+
+- "Relevant evidence types" describe evidence sources that may be useful.
+  They do not mean those sources were actually collected.
+- Only describe evidence as supporting or conflicting when the supplied
+  packet contains an actual result for that evidence source.
+- If an evidence source is marked pending, not requested, unavailable,
+  or missing, explicitly treat it as unavailable.
+- Never convert a planned evidence source into a factual observation.
+- The attached audio is the actual BirdNET-Go recording associated with
+  this detection. Assess it cautiously and describe whether the acoustic
+  content appears consistent, inconsistent, or uncertain relative to
+  the proposed BirdNET identification.
+- Audio assessment by Gemini is supporting evidence only and does not
+  independently establish biological presence.
+
 The EarthRanger notification must remain concise.
 Detailed evidence and audio should remain within the EarthRanger event.
+
+The Species Register status must never be used as evidence that the current
+BirdNET detection is acoustically correct. A species may already be registered
+and the current detection may still be a false positive.
+
+You must explicitly assess the supplied audio as one of:
+- consistent
+- inconsistent
+- uncertain
+
+Base this only on the supplied recording. If the recording is weak, ambiguous,
+contains overlapping sounds, or you cannot confidently assess it, use uncertain.
+
+You must also provide a recommended BirdNET review status:
+- correct
+- false_positive
+- review_required
+
+Do not recommend correct or false_positive solely from Species Register status,
+BirdNET confidence, geographic plausibility, or external occurrence evidence.
+The audio evidence must materially support the recommendation.
 """.strip()
 
 
@@ -66,6 +103,9 @@ Your response should:
 6. Suggest an operational priority:
    routine, review, or priority_review.
 7. Produce a concise EarthRanger notification.
+8. Explicitly assess the supplied BirdNET audio.
+9. Recommend one BirdNET review status:
+   correct, false_positive, or review_required.
 
 Do not make a biological confirmation or rejection.
 

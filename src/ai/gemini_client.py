@@ -16,14 +16,13 @@ from google import genai
 from google.genai import errors
 from google.genai import types
 
-
 GEMINI_RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
         "summary": {
             "type": "string",
             "description": (
-                "Brief contextual interpretation of the candidate detection."
+                "Brief conservative interpretation of the BirdNET detection."
             ),
         },
 
@@ -35,13 +34,36 @@ GEMINI_RESPONSE_SCHEMA = {
             ),
         },
 
+        "audio_assessment": {
+            "type": "string",
+            "enum": [
+                "consistent",
+                "inconsistent",
+                "uncertain",
+            ],
+            "description": (
+                "Assessment of whether the supplied audio appears acoustically "
+                "consistent with the proposed BirdNET species identification. "
+                "This is supporting evidence only, not biological confirmation."
+            ),
+        },
+
+        "audio_evidence": {
+            "type": "string",
+            "description": (
+                "Short explanation of what in the supplied recording supports "
+                "the audio assessment. Do not invent vocal characteristics."
+            ),
+        },
+
         "evidence_highlights": {
             "type": "array",
             "items": {
                 "type": "string",
             },
             "description": (
-                "Most relevant supporting or conflicting evidence."
+                "Evidence actually present in the supplied packet. "
+                "Do not treat pending or unrequested sources as evidence."
             ),
         },
 
@@ -51,14 +73,27 @@ GEMINI_RESPONSE_SCHEMA = {
                 "type": "string",
             },
             "description": (
-                "Important limitations, uncertainty, or missing evidence."
+                "Important limitations, missing evidence, or uncertainty."
+            ),
+        },
+
+        "recommended_status": {
+            "type": "string",
+            "enum": [
+                "correct",
+                "false_positive",
+                "review_required",
+            ],
+            "description": (
+                "Recommended BirdNET review outcome. This is a screening "
+                "recommendation and is not yet an automatic final verification."
             ),
         },
 
         "review_recommendation": {
             "type": "string",
             "description": (
-                "Recommended human review action."
+                "Recommended next human or automated review action."
             ),
         },
 
@@ -77,7 +112,7 @@ GEMINI_RESPONSE_SCHEMA = {
         "notification_text": {
             "type": "string",
             "description": (
-                "Concise notification text suitable for EarthRanger."
+                "Concise notification suitable for downstream systems."
             ),
         },
     },
@@ -85,8 +120,11 @@ GEMINI_RESPONSE_SCHEMA = {
     "required": [
         "summary",
         "register_context",
+        "audio_assessment",
+        "audio_evidence",
         "evidence_highlights",
         "uncertainties",
+        "recommended_status",
         "review_recommendation",
         "suggested_priority",
         "notification_text",
@@ -100,6 +138,8 @@ DEFAULT_MODEL_CHAIN = [
     "gemini-3.8-flash",
     "gemini-3.7-flash",
     "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
 ]
 
 
@@ -157,6 +197,8 @@ def _parse_response(
 
 def run_gemini_interpretation(
     prompt,
+    audio_path=None,
+    audio_mime_type=None,
 ):
     """Send evidence to Gemini and return structured JSON.
 
@@ -183,6 +225,34 @@ def run_gemini_interpretation(
 
     last_error = None
 
+    contents = [
+        prompt
+    ]
+
+    if audio_path:
+
+        if not audio_mime_type:
+            raise RuntimeError(
+                "audio_mime_type is required when audio_path is provided."
+            )
+
+        with open(
+            audio_path,
+            "rb",
+        ) as audio_file:
+            audio_bytes = audio_file.read()
+
+        contents.append(
+            types.Part.from_bytes(
+                data=audio_bytes,
+                mime_type=audio_mime_type,
+            )
+        )
+
+        print(
+            f"Audio attached to Gemini request: {audio_path}"
+        )
+
     for model_name in model_chain:
 
         print(
@@ -193,7 +263,7 @@ def run_gemini_interpretation(
             response = client.models.generate_content(
                 model=model_name,
 
-                contents=prompt,
+                contents=contents,
 
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
