@@ -1,17 +1,16 @@
 """BirdNET-Go review write-back adapter.
 
-The first implementation is intentionally safe:
+This module supports:
 
-- Generates a comment-only review request.
-- Does NOT send a verification status.
-- Defaults to dry-run mode.
-- Therefore it cannot mark a detection Correct or False Positive
-  unless that behaviour is explicitly added later.
+- dry-run preview
+- authenticated BirdNET-Go sessions
+- CSRF-protected comment write-back
+- comment-only review requests
 
-BirdNET-Go endpoint:
-POST /api/v2/detections/:id/review
+Important:
+This implementation does NOT send a verification status.
+It therefore does not mark detections Correct or False Positive.
 """
-
 
 import os
 
@@ -26,6 +25,18 @@ BIRDNET_BASE_URL = os.getenv(
     "BIRDNET_BASE_URL",
     "",
 ).rstrip("/")
+
+
+BIRDNET_SESSION_COOKIE = os.getenv(
+    "BIRDNET_SESSION_COOKIE",
+    "",
+)
+
+
+BIRDNET_CSRF_TOKEN = os.getenv(
+    "BIRDNET_CSRF_TOKEN",
+    "",
+)
 
 
 class BirdNETReviewWriteError(RuntimeError):
@@ -74,11 +85,77 @@ def build_review_url(
     )
 
 
+def build_authenticated_session():
+    """Build an authenticated BirdNET-Go requests session."""
+
+    if not BIRDNET_SESSION_COOKIE:
+        raise BirdNETReviewWriteError(
+            "BIRDNET_SESSION_COOKIE is not configured."
+        )
+
+    if not BIRDNET_CSRF_TOKEN:
+        raise BirdNETReviewWriteError(
+            "BIRDNET_CSRF_TOKEN is not configured."
+        )
+
+    session = requests.Session()
+
+    session.cookies.set(
+        "_gothic_session",
+        BIRDNET_SESSION_COOKIE,
+    )
+
+    session.cookies.set(
+        "csrf",
+        BIRDNET_CSRF_TOKEN,
+    )
+
+    session.headers.update(
+        {
+            "X-CSRF-Token":
+                BIRDNET_CSRF_TOKEN,
+
+            "Content-Type":
+                "application/json",
+        }
+    )
+
+    return session
+
+
+def test_authenticated_session(
+    session=None,
+):
+    """Test access to a protected BirdNET-Go endpoint."""
+
+    if session is None:
+        session = build_authenticated_session()
+
+    url = (
+        f"{BIRDNET_BASE_URL}"
+        "/api/v2/detections/ignored"
+    )
+
+    response = session.get(
+        url,
+        timeout=15,
+    )
+
+    if not response.ok:
+        raise BirdNETReviewWriteError(
+            "BirdNET-Go authentication test failed. "
+            f"HTTP {response.status_code}: "
+            f"{response.text}"
+        )
+
+    return response
+
+
 def preview_comment_write(
     detection_id,
     note_text,
 ):
-    """Preview the BirdNET-Go write without changing anything."""
+    """Preview a BirdNET-Go comment write without changing data."""
 
     url = build_review_url(
         detection_id
@@ -102,6 +179,14 @@ def preview_comment_write(
 
     print(
         "HTTP method: POST"
+    )
+
+    print(
+        "Authentication required: YES"
+    )
+
+    print(
+        "CSRF protection: YES"
     )
 
     print(
@@ -137,14 +222,15 @@ def write_comment(
     note_text,
     session=None,
 ):
-    """Write a comment to BirdNET-Go.
+    """Write a comment-only review to BirdNET-Go.
 
-    IMPORTANT:
-    This function sends ONLY the comment field.
-    It does not send a verification status.
+    This sends only:
 
-    Authentication still needs to be configured before this
-    function should be used against the live BirdNET-Go system.
+        {
+            "comment": "..."
+        }
+
+    No verification status is sent.
     """
 
     url = build_review_url(
@@ -156,10 +242,7 @@ def write_comment(
     )
 
     if session is None:
-        raise BirdNETReviewWriteError(
-            "Authenticated BirdNET session is required. "
-            "No live request was sent."
-        )
+        session = build_authenticated_session()
 
     response = session.post(
         url,
@@ -169,7 +252,7 @@ def write_comment(
 
     if not response.ok:
         raise BirdNETReviewWriteError(
-            "BirdNET-Go review write failed. "
+            "BirdNET-Go comment write failed. "
             f"HTTP {response.status_code}: "
             f"{response.text}"
         )

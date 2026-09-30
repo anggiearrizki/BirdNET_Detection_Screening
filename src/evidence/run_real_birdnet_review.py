@@ -21,6 +21,7 @@ That will be the next integration step.
 
 from pathlib import Path
 import sys
+import argparse
 
 
 SRC_DIR = Path(__file__).resolve().parents[1]
@@ -121,6 +122,32 @@ def build_packet_from_candidate(
         ),
     )
 
+def parse_args():
+    """Parse command-line arguments for a real BirdNET-Go detection."""
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run the BirdNET-Go review workflow "
+            "for a real detection."
+        )
+    )
+
+    parser.add_argument(
+        "detection_id",
+        type=int,
+        help="BirdNET-Go detection ID.",
+    )
+
+    parser.add_argument(
+        "--island",
+        required=True,
+        help=(
+            "Property or island associated with "
+            "the BirdNET-Go deployment."
+        ),
+    )
+
+    return parser.parse_args()
 
 def main():
 
@@ -128,12 +155,10 @@ def main():
     # Configuration for this real test
     # ---------------------------------------------------------
 
-    detection_id = 10191
+    args = parse_args()
 
-    # Temporary property assignment.
-    # Later this should be determined from BirdNET station /
-    # deployment configuration automatically.
-    island = "Nikoi"
+    detection_id = args.detection_id
+    island = args.island
 
     # ---------------------------------------------------------
     # 1. Retrieve real BirdNET-Go detection
