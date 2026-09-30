@@ -161,12 +161,19 @@ def build_birdnet_review_note(
             "- No additional uncertainty supplied."
         )
 
+    model_used = _clean_text(
+        gemini_result.get(
+            "model_used"
+        )
+    )
+
     note = (
         "Automated Screening Assessment\n\n"
         f"Detection ID: {detection_id}\n"
         f"Species: {common_name} "
         f"({scientific_name})\n"
         f"BirdNET confidence: {confidence_text}\n\n"
+        f"AI model: {model_used}\n\n"
 
         f"Audio assessment: "
         f"{audio_assessment}\n"

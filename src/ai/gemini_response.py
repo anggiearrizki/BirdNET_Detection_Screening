@@ -106,6 +106,13 @@ def validate_gemini_response(
             "Gemini response must be a dictionary."
         )
 
+    model_used = _clean_string(
+        response.get(
+            "model_used"
+        ),
+        "model_used",
+    )
+
     summary = _clean_string(
         response.get(
             "summary"
@@ -204,6 +211,9 @@ def validate_gemini_response(
     )
 
     validated = {
+        "model_used":
+            model_used,
+
         "summary":
             summary,
 
@@ -249,6 +259,13 @@ def print_gemini_validation_summary(
 
     print(
         "Status: VALID"
+    )
+
+    print(
+        "Gemini model:",
+        validated_response.get(
+            "model_used"
+        ),
     )
 
     print(

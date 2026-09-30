@@ -4,17 +4,28 @@ This module sends a prepared candidate evidence prompt to Gemini and
 requires the response to follow the structured schema expected by the
 downstream validation and EarthRanger mapping layers.
 
-If the primary Gemini model is temporarily unavailable, the client can
-fall back to another stable Flash model.
+The client supports:
+- BirdNET audio input
+- Structured JSON responses
+- Model fallback for normal workflow use
+- Fixed-model benchmarking
+- Retry handling for temporary Gemini 503 capacity errors
+- Audit tracking of the Gemini model that produced each result
 """
 
 import json
 import os
+import time
 
 from dotenv import load_dotenv
 from google import genai
 from google.genai import errors
 from google.genai import types
+
+
+# ---------------------------------------------------------------------
+# Structured Gemini response schema
+# ---------------------------------------------------------------------
 
 GEMINI_RESPONSE_SCHEMA = {
     "type": "object",
@@ -134,6 +145,10 @@ GEMINI_RESPONSE_SCHEMA = {
 }
 
 
+# ---------------------------------------------------------------------
+# Default Gemini model chain
+# ---------------------------------------------------------------------
+
 DEFAULT_MODEL_CHAIN = [
     "gemini-3.8-flash",
     "gemini-3.7-flash",
@@ -156,6 +171,7 @@ def _get_model_chain():
     ]
 
     for model_name in DEFAULT_MODEL_CHAIN:
+
         if model_name not in model_chain:
             model_chain.append(
                 model_name
@@ -175,11 +191,13 @@ def _parse_response(
         )
 
     try:
+
         parsed_response = json.loads(
             response.text
         )
 
     except json.JSONDecodeError as exc:
+
         raise RuntimeError(
             "Gemini response could not be parsed as JSON."
         ) from exc
@@ -199,12 +217,47 @@ def run_gemini_interpretation(
     prompt,
     audio_path=None,
     audio_mime_type=None,
+    model_override=None,
+    allow_fallback=True,
+    max_retries_per_model=3,
 ):
     """Send evidence to Gemini and return structured JSON.
 
-    Stable Flash models are attempted in order if a model is
-    temporarily unavailable.
+    Parameters
+    ----------
+    prompt:
+        Prepared biodiversity evidence prompt.
+
+    audio_path:
+        Optional BirdNET audio file to attach to the Gemini request.
+
+    audio_mime_type:
+        MIME type for the supplied audio file.
+
+    model_override:
+        Optional Gemini model to try first.
+
+    allow_fallback:
+        If True, another configured model may be attempted after all
+        retries for the current model fail.
+
+        If False, only the selected model is used. This is important
+        for controlled historical benchmarking.
+
+    max_retries_per_model:
+        Maximum number of attempts for each model when temporary
+        503 capacity errors occur.
+
+    Returns
+    -------
+    dict
+        Structured Gemini response plus a locally added `model_used`
+        field for auditability.
     """
+
+    # -----------------------------------------------------------------
+    # Environment and API client
+    # -----------------------------------------------------------------
 
     load_dotenv()
 
@@ -217,13 +270,47 @@ def run_gemini_interpretation(
             "GEMINI_API_KEY is not available in the environment."
         )
 
+    if max_retries_per_model < 1:
+        raise ValueError(
+            "max_retries_per_model must be at least 1."
+        )
+
     client = genai.Client(
         api_key=api_key
     )
 
-    model_chain = _get_model_chain()
+    # -----------------------------------------------------------------
+    # Determine which models are allowed for this run
+    # -----------------------------------------------------------------
 
-    last_error = None
+    if model_override:
+
+        if allow_fallback:
+
+            model_chain = [
+                model_override
+            ]
+
+            for model_name in _get_model_chain():
+
+                if model_name not in model_chain:
+                    model_chain.append(
+                        model_name
+                    )
+
+        else:
+
+            model_chain = [
+                model_override
+            ]
+
+    else:
+
+        model_chain = _get_model_chain()
+
+    # -----------------------------------------------------------------
+    # Build Gemini request contents
+    # -----------------------------------------------------------------
 
     contents = [
         prompt
@@ -253,61 +340,137 @@ def run_gemini_interpretation(
             f"Audio attached to Gemini request: {audio_path}"
         )
 
-    for model_name in model_chain:
+    # -----------------------------------------------------------------
+    # Run Gemini
+    # -----------------------------------------------------------------
 
-        print(
-            f"Trying Gemini model: {model_name}"
-        )
+    last_error = None
 
-        try:
-            response = client.models.generate_content(
-                model=model_name,
+    for model_index, model_name in enumerate(
+        model_chain
+    ):
 
-                contents=contents,
-
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-
-                    response_json_schema=(
-                        GEMINI_RESPONSE_SCHEMA
-                    ),
-
-                    automatic_function_calling=(
-                        types.AutomaticFunctionCallingConfig(
-                            disable=True
-                        )
-                    ),
-                ),
-            )
-
-            parsed_response = _parse_response(
-                response
-            )
+        for attempt in range(
+            1,
+            max_retries_per_model + 1,
+        ):
 
             print(
-                f"Gemini model succeeded: {model_name}"
+                f"Trying Gemini model: {model_name} "
+                f"(attempt {attempt}/{max_retries_per_model})"
             )
 
-            return parsed_response
+            try:
 
-        except errors.ServerError as exc:
+                response = client.models.generate_content(
+                    model=model_name,
 
-            last_error = exc
+                    contents=contents,
 
-            error_code = getattr(
-                exc,
-                "code",
-                None,
-            )
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
 
-            if error_code == 503:
-                print(
-                    f"{model_name} unavailable. "
-                    "Trying next stable model..."
+                        response_json_schema=(
+                            GEMINI_RESPONSE_SCHEMA
+                        ),
+
+                        automatic_function_calling=(
+                            types.AutomaticFunctionCallingConfig(
+                                disable=True
+                            )
+                        ),
+                    ),
                 )
-                continue
 
-            raise
+                parsed_response = _parse_response(
+                    response
+                )
+
+                print(
+                    f"Gemini model succeeded: {model_name}"
+                )
+
+                # -----------------------------------------------------
+                # Add model audit information locally.
+                #
+                # This is deliberately not part of the Gemini response
+                # schema because Gemini should not decide which model
+                # produced its own output.
+                # -----------------------------------------------------
+
+                parsed_response[
+                    "model_used"
+                ] = model_name
+
+                return parsed_response
+
+            except errors.ServerError as exc:
+
+                last_error = exc
+
+                error_code = getattr(
+                    exc,
+                    "code",
+                    None,
+                )
+
+                # -----------------------------------------------------
+                # Temporary capacity error
+                # -----------------------------------------------------
+
+                if error_code == 503:
+
+                    if attempt < max_retries_per_model:
+
+                        wait_seconds = (
+                            2 ** attempt
+                        )
+
+                        print(
+                            f"{model_name} temporarily unavailable "
+                            f"(503). Retrying the same model in "
+                            f"{wait_seconds} seconds..."
+                        )
+
+                        time.sleep(
+                            wait_seconds
+                        )
+
+                        continue
+
+                    # -------------------------------------------------
+                    # All retries for this model have been exhausted
+                    # -------------------------------------------------
+
+                    has_next_model = (
+                        model_index
+                        <
+                        len(model_chain) - 1
+                    )
+
+                    if (
+                        allow_fallback
+                        and has_next_model
+                    ):
+
+                        print(
+                            f"{model_name} remained unavailable "
+                            f"after {max_retries_per_model} attempts. "
+                            "Moving to the next configured model..."
+                        )
+
+                        break
+
+                    raise RuntimeError(
+                        f"{model_name} remained unavailable "
+                        f"after {max_retries_per_model} attempts."
+                    ) from exc
+
+                # -----------------------------------------------------
+                # Non-503 server errors should not be hidden
+                # -----------------------------------------------------
+
+                raise
 
     raise RuntimeError(
         "All configured Gemini models were unavailable."

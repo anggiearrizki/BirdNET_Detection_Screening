@@ -31,6 +31,9 @@ if str(SRC_DIR) not in sys.path:
         str(SRC_DIR),
     )
 
+from integration.birdnet_review_writer import (
+    preview_comment_write,
+)
 
 from integration.birdnet_client import (
     get_detection,
@@ -281,9 +284,22 @@ def main():
         birdnet_review_note
     )
 
+    # ---------------------------------------------------------
+    # 10. Preview BirdNET-Go Notes write-back
+    # ---------------------------------------------------------
+
+    print()
+
+    preview_comment_write(
+        detection_id=candidate[
+            "source_record_id"
+        ],
+        note_text=birdnet_review_note,
+    )
+
 
     # ---------------------------------------------------------
-    # 10. Current prototype boundary
+    # 11. Current prototype boundary
     # ---------------------------------------------------------
 
     print()
@@ -294,6 +310,10 @@ def main():
 
     print(
         "BirdNET detection retrieved: YES"
+    )
+
+    print(
+    "BirdNET Notes write-back dry run: YES"
     )
 
     print(
@@ -337,4 +357,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
