@@ -1,260 +1,77 @@
-"""BirdNET-Go review write-back adapter.
-
-This module supports:
-
-- dry-run preview
-- authenticated BirdNET-Go sessions
-- CSRF-protected comment write-back
-- comment-only review requests
-
-Important:
-This implementation does NOT send a verification status.
-It therefore does not mark detections Correct or False Positive.
-"""
-
+"""Comment-only BirdNET writer. No verification or lock fields are sent."""
 import os
-
+from pathlib import Path
+from urllib.parse import urlparse
 import requests
 from dotenv import load_dotenv
 
-
-load_dotenv()
-
-
-BIRDNET_BASE_URL = os.getenv(
-    "BIRDNET_BASE_URL",
-    "",
-).rstrip("/")
-
-
-BIRDNET_SESSION_COOKIE = os.getenv(
-    "BIRDNET_SESSION_COOKIE",
-    "",
-)
-
-
-BIRDNET_CSRF_TOKEN = os.getenv(
-    "BIRDNET_CSRF_TOKEN",
-    "",
-)
-
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / '.env', override=True)
+BIRDNET_BASE_URL = os.getenv('BIRDNET_BASE_URL', '').rstrip('/')
 
 class BirdNETReviewWriteError(RuntimeError):
-    """Raised when BirdNET-Go review write-back fails."""
+    def __init__(self, message, http_status=None):
+        super().__init__(message)
+        self.http_status = http_status
 
+def build_comment_payload(note_text):
+    if not isinstance(note_text, str) or not note_text.strip():
+        raise ValueError('note_text must be a nonempty string.')
+    return {'comment': note_text.strip()}
 
-def build_comment_payload(
-    note_text,
-):
-    """Build a BirdNET-Go comment-only review payload."""
+def build_review_url(detection_id):
+    if not BIRDNET_BASE_URL or int(detection_id) <= 0:
+        raise BirdNETReviewWriteError('A base URL and positive detection ID are required.')
+    return f'{BIRDNET_BASE_URL}/api/v2/detections/{int(detection_id)}/review'
 
-    if not isinstance(
-        note_text,
-        str,
-    ):
-        raise ValueError(
-            "note_text must be a string."
-        )
-
-    note_text = note_text.strip()
-
-    if not note_text:
-        raise ValueError(
-            "note_text cannot be empty."
-        )
-
-    return {
-        "comment": note_text,
-    }
-
-
-def build_review_url(
-    detection_id,
-):
-    """Build the BirdNET-Go review endpoint URL."""
-
-    if not BIRDNET_BASE_URL:
-        raise BirdNETReviewWriteError(
-            "BIRDNET_BASE_URL is not configured."
-        )
-
-    return (
-        f"{BIRDNET_BASE_URL}"
-        f"/api/v2/detections/"
-        f"{detection_id}/review"
-    )
-
-
-def build_authenticated_session():
-    """Build an authenticated BirdNET-Go requests session."""
-
-    if not BIRDNET_SESSION_COOKIE:
-        raise BirdNETReviewWriteError(
-            "BIRDNET_SESSION_COOKIE is not configured."
-        )
-
-    if not BIRDNET_CSRF_TOKEN:
-        raise BirdNETReviewWriteError(
-            "BIRDNET_CSRF_TOKEN is not configured."
-        )
-
+def build_authenticated_session(station=None):
+    load_dotenv(PROJECT_ROOT / '.env', override=True)
+    prefix = f'BIRDNET_{station}_' if station else 'BIRDNET_'
+    cookie = os.getenv(prefix + 'SESSION_COOKIE', '')
+    csrf = os.getenv(prefix + 'CSRF_TOKEN', '')
+    if not cookie or not csrf:
+        raise BirdNETReviewWriteError(f'Configure {prefix}SESSION_COOKIE and {prefix}CSRF_TOKEN.')
+    host = urlparse(BIRDNET_BASE_URL).hostname
+    if not host:
+        raise BirdNETReviewWriteError('Invalid BirdNET base URL.')
     session = requests.Session()
-
-    session.cookies.set(
-        "_gothic_session",
-        BIRDNET_SESSION_COOKIE,
-    )
-
-    session.cookies.set(
-        "csrf",
-        BIRDNET_CSRF_TOKEN,
-    )
-
-    session.headers.update(
-        {
-            "X-CSRF-Token":
-                BIRDNET_CSRF_TOKEN,
-
-            "Content-Type":
-                "application/json",
-        }
-    )
-
+    session.cookies.set('_gothic_session', cookie, domain=host, path='/')
+    session.cookies.set('csrf', csrf, domain=host, path='/')
+    session.headers.update({'X-CSRF-Token': csrf, 'Content-Type': 'application/json'})
     return session
 
+def test_authenticated_session(session=None):
+    owned = session is None
+    session = session or build_authenticated_session()
+    try:
+        response = session.get(f'{BIRDNET_BASE_URL}/api/v2/detections/ignored', timeout=15,
+                               allow_redirects=False)
+        if not response.ok or response.is_redirect:
+            raise BirdNETReviewWriteError('Protected GET failed.', response.status_code)
+        return response  # GET success does not prove permission to POST.
+    finally:
+        if owned:
+            session.close()
 
-def test_authenticated_session(
-    session=None,
-):
-    """Test access to a protected BirdNET-Go endpoint."""
+def preview_comment_write(detection_id, note_text):
+    result = {'url': build_review_url(detection_id),
+              'payload': build_comment_payload(note_text), 'dry_run': True}
+    print(result)
+    return result
 
-    if session is None:
-        session = build_authenticated_session()
-
-    url = (
-        f"{BIRDNET_BASE_URL}"
-        "/api/v2/detections/ignored"
-    )
-
-    response = session.get(
-        url,
-        timeout=15,
-    )
-
-    if not response.ok:
-        raise BirdNETReviewWriteError(
-            "BirdNET-Go authentication test failed. "
-            f"HTTP {response.status_code}: "
-            f"{response.text}"
-        )
-
-    return response
-
-
-def preview_comment_write(
-    detection_id,
-    note_text,
-):
-    """Preview a BirdNET-Go comment write without changing data."""
-
-    url = build_review_url(
-        detection_id
-    )
-
-    payload = build_comment_payload(
-        note_text
-    )
-
-    print("=" * 70)
-    print("BIRDNET-GO COMMENT WRITE PREVIEW")
-    print("=" * 70)
-
-    print(
-        f"Detection ID: {detection_id}"
-    )
-
-    print(
-        f"Endpoint: {url}"
-    )
-
-    print(
-        "HTTP method: POST"
-    )
-
-    print(
-        "Authentication required: YES"
-    )
-
-    print(
-        "CSRF protection: YES"
-    )
-
-    print(
-        "Verification status included: NO"
-    )
-
-    print(
-        "Live request sent: NO"
-    )
-
-    print()
-
-    print(
-        "Payload:"
-    )
-
-    print(
-        payload
-    )
-
-    print()
-    print("=" * 70)
-
-    return {
-        "url": url,
-        "payload": payload,
-        "dry_run": True,
-    }
-
-
-def write_comment(
-    detection_id,
-    note_text,
-    session=None,
-):
-    """Write a comment-only review to BirdNET-Go.
-
-    This sends only:
-
-        {
-            "comment": "..."
-        }
-
-    No verification status is sent.
-    """
-
-    url = build_review_url(
-        detection_id
-    )
-
-    payload = build_comment_payload(
-        note_text
-    )
-
-    if session is None:
-        session = build_authenticated_session()
-
-    response = session.post(
-        url,
-        json=payload,
-        timeout=30,
-    )
-
-    if not response.ok:
-        raise BirdNETReviewWriteError(
-            "BirdNET-Go comment write failed. "
-            f"HTTP {response.status_code}: "
-            f"{response.text}"
-        )
-
-    return response
+def write_comment(detection_id, note_text, session=None):
+    owned = session is None
+    session = session or build_authenticated_session()
+    try:
+        response = session.post(build_review_url(detection_id),
+                                json=build_comment_payload(note_text), timeout=30,
+                                allow_redirects=False)
+        if not 200 <= response.status_code < 300:
+            # Do not print response bodies, which may contain sensitive content.
+            raise BirdNETReviewWriteError(
+                f'BirdNET comment POST rejected: HTTP {response.status_code}.',
+                response.status_code)
+        return response
+    finally:
+        if owned:
+            session.close()

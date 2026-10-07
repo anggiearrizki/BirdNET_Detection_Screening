@@ -1,622 +1,283 @@
 """Automatic BirdNET-Go detection scanner.
-
-This module is intentionally read-only.
-
-It:
-- scans recent BirdNET-Go detections
-- tracks the highest BirdNET detection ID seen
-- identifies genuinely newer detections
-- adds new unverified detections to a local review queue
-- never changes BirdNET-Go data
-- never calls Gemini
-
-Later, the pending queue can feed the automated review pipeline.
+Each BirdNET-Go station maintains its own:
+- base URL
+- high-water mark
+- scanner state
+- review queue
+The scanner is read-only against BirdNET-Go.
+It never calls Gemini and never modifies BirdNET records.
 """
-
 import argparse
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
-
 import requests
-from dotenv import load_dotenv
-
-
+from birdnet_station_config import get_station_config
 # ---------------------------------------------------------------------
 # Project paths
 # ---------------------------------------------------------------------
-
 CURRENT_FILE = Path(__file__).resolve()
 PROJECT_ROOT = CURRENT_FILE.parents[2]
-
-STATE_DIR = (
-    PROJECT_ROOT
-    / "data"
-    / "processed"
-)
-
-STATE_FILE = (
-    STATE_DIR
-    / "birdnet_scanner_state.json"
-)
-
-QUEUE_FILE = (
-    STATE_DIR
-    / "birdnet_review_queue.json"
-)
-
-
-# ---------------------------------------------------------------------
-# Environment
-# ---------------------------------------------------------------------
-
-load_dotenv()
-
-BIRDNET_BASE_URL = os.getenv(
-    "BIRDNET_BASE_URL",
-    "",
-).rstrip("/")
-
-
+PROCESSED_DIR = PROJECT_ROOT / "data" / "processed" / "birdnet"
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
-
 def utc_now():
     """Return an ISO UTC timestamp."""
-
     return datetime.now(
         timezone.utc
     ).isoformat()
-
-
-def load_json(
-    path,
-    default,
-):
+def load_json(path, default):
     """Load JSON from disk or return a default value."""
-
     if not path.exists():
         return default
-
     with open(
         path,
         "r",
         encoding="utf-8",
     ) as file:
-        return json.load(
-            file
-        )
-
-
-def save_json(
-    path,
-    data,
-):
-    """Write JSON safely to disk."""
-
-    path.parent.mkdir(
-        parents=True,
-        exist_ok=True,
+        return json.load(file)
+from birdnet_queue_worker import save_json
+def get_station_paths(station):
+    """Return station-specific state and queue paths."""
+    station_dir = (
+        PROCESSED_DIR
+        / station.lower()
     )
-
-    with open(
-        path,
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            data,
-            file,
-            indent=2,
-            ensure_ascii=False,
-        )
-
-
+    return {
+        "station_dir": station_dir,
+        "state_file":
+            station_dir
+            / "scanner_state.json",
+        "queue_file":
+            station_dir
+            / "review_queue.json",
+    }
 # ---------------------------------------------------------------------
 # BirdNET retrieval
 # ---------------------------------------------------------------------
-
-def get_recent_detections(
-    limit=100,
-):
-    """Retrieve recent BirdNET-Go detections."""
-
-    if not BIRDNET_BASE_URL:
-        raise RuntimeError(
-            "BIRDNET_BASE_URL is not configured."
-        )
-
-    url = (
-        f"{BIRDNET_BASE_URL}"
-        "/api/v2/detections"
-    )
-
+def get_recent_detections(base_url, limit=200, offset=0):
     response = requests.get(
-        url,
-        params={
-            "limit": limit,
-            "offset": 0,
-            "sortBy": "date_desc",
-        },
+        f"{base_url}/api/v2/detections",
+        params={"limit": limit, "offset": offset, "sortBy": "date_desc"},
         timeout=30,
     )
-
     response.raise_for_status()
-
     payload = response.json()
-
-    detections = payload.get(
-        "data",
-        [],
-    )
-
-    if not isinstance(
-        detections,
-        list,
-    ):
-        raise RuntimeError(
-            "Unexpected BirdNET-Go response format."
-        )
-
-    return detections
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        raise RuntimeError("Unexpected BirdNET list response; state unchanged.")
+    rows = payload["data"]
+    for row in rows:
+        if not isinstance(row, dict) or int(row.get("id", 0)) <= 0:
+            raise ValueError("Invalid detection ID; state unchanged.")
+    return rows
 
 
-# ---------------------------------------------------------------------
-# Queue conversion
-# ---------------------------------------------------------------------
+def retrieve_complete_listing(base_url, limit, max_pages):
+    # Date order does not prove ID order. Traverse the complete listing rather
+    # than stopping as soon as one old ID appears.
+    first = get_recent_detections(base_url, limit, 0)
+    rows = {}; offset = 0; page = first
+    signatures = set()
+    for page_number in range(max_pages):
+        if not page:
+            break
+        signature = tuple(int(row["id"]) for row in page)
+        if signature in signatures:
+            raise RuntimeError("BirdNET repeated a page; state unchanged.")
+        signatures.add(signature)
+        rows.update((int(row["id"]), row) for row in page)
+        offset += len(page)
+        page = get_recent_detections(base_url, limit, offset)
+    else:
+        raise RuntimeError("Page limit reached; state unchanged. Increase --max-pages.")
+    check = get_recent_detections(base_url, limit, 0)
+    if [r["id"] for r in check] != [r["id"] for r in first]:
+        raise RuntimeError("Listing changed during scan; retry later. State unchanged.")
+    return list(rows.values()), len(signatures)
 
 def build_queue_record(
     detection,
-    island,
+    property_name,
+    station,
 ):
-    """Convert a BirdNET detection into a queue record."""
-
+    """Convert a BirdNET detection into a local queue record."""
     return {
         "detection_id":
             detection.get(
                 "id"
             ),
-
         "common_name":
             detection.get(
                 "commonName"
             ),
-
         "scientific_name":
             detection.get(
                 "scientificName"
             ),
-
         "confidence":
             detection.get(
                 "confidence"
             ),
-
         "verified":
             detection.get(
                 "verified"
             ),
-
         "date":
             detection.get(
                 "date"
             ),
-
         "time":
             detection.get(
                 "time"
             ),
-
         "timestamp":
             detection.get(
                 "timestamp"
             ),
-
         "clip_name":
             detection.get(
                 "clipName"
             ),
-
         "days_since_first_seen":
             detection.get(
                 "daysSinceFirstSeen"
             ),
-
         "is_new_this_season":
             detection.get(
                 "isNewThisSeason"
             ),
-
         "days_this_year":
             detection.get(
                 "daysThisYear"
             ),
-
         "current_season":
             detection.get(
                 "currentSeason"
             ),
-
+        # Keep "island" temporarily for compatibility
+        # with the existing queue worker.
         "island":
-            island,
-
+            property_name,
+        "property":
+            property_name,
+        "station":
+            station,
         "source":
             "BirdNET-Go",
-
         "queue_status":
             "pending",
-
         "discovered_by_scanner_at":
             utc_now(),
-
         "processed_at":
             None,
-
         "processing_note":
             None,
     }
-
-
 # ---------------------------------------------------------------------
-# Scanner state
+# State and queue
 # ---------------------------------------------------------------------
-
-def load_state():
-    """Load scanner state and migrate older state if necessary."""
-
-    state = load_json(
-        STATE_FILE,
+def load_state(state_file):
+    """Load station-specific scanner state."""
+    return load_json(
+        state_file,
         {
             "highest_seen_detection_id": None,
             "last_scan_at": None,
         },
     )
-
-    # Migration from the earlier seen_detection_ids approach.
-    if (
-        state.get(
-            "highest_seen_detection_id"
-        )
-        is None
-    ):
-
-        old_seen_ids = state.get(
-            "seen_detection_ids",
-            [],
-        )
-
-        if old_seen_ids:
-            state[
-                "highest_seen_detection_id"
-            ] = max(
-                int(detection_id)
-                for detection_id
-                in old_seen_ids
-            )
-
-    # Remove the old state field.
-    state.pop(
-        "seen_detection_ids",
-        None,
-    )
-
-    return state
-
-
-def load_queue():
-    """Load the local BirdNET review queue."""
-
+def load_queue(queue_file):
+    """Load station-specific review queue."""
     return load_json(
-        QUEUE_FILE,
+        queue_file,
         {
             "detections": [],
             "updated_at": None,
         },
     )
-
-
 # ---------------------------------------------------------------------
 # Scanner
 # ---------------------------------------------------------------------
-
-def scan_detections(
-    island,
-    limit=100,
-    bootstrap=False,
-):
-    """Scan BirdNET-Go and update the local queue."""
-
-    state = load_state()
-    queue = load_queue()
-
-    highest_seen_id = state.get(
-        "highest_seen_detection_id"
-    )
-
-    if highest_seen_id is not None:
-        highest_seen_id = int(
-            highest_seen_id
-        )
-
-    queued_ids = {
-        int(item["detection_id"])
-        for item in queue.get(
-            "detections",
-            [],
-        )
-        if item.get(
-            "detection_id"
-        ) is not None
-    }
-
-    detections = get_recent_detections(
-        limit=limit
-    )
-
-    valid_detections = [
-        detection
-        for detection in detections
-        if detection.get(
-            "id"
-        ) is not None
-    ]
-
-    if not valid_detections:
-        return {
-            "retrieved": 0,
-            "newly_seen": 0,
-            "newly_queued": [],
-            "total_queue": len(
-                queue["detections"]
-            ),
-            "bootstrap": bootstrap,
-            "highest_seen_detection_id":
-                highest_seen_id,
-        }
-
-    detection_ids = [
-        int(
-            detection["id"]
-        )
-        for detection
-        in valid_detections
-    ]
-
-    current_max_id = max(
-        detection_ids
-    )
-
-    # -------------------------------------------------------------
-    # Bootstrap
-    # -------------------------------------------------------------
-
+def scan_detections(station, limit=200, bootstrap=False, max_pages=1000,
+                    since_id=None):
+    if limit <= 0 or max_pages <= 0:
+        raise ValueError("Page size and page limit must be positive.")
+    config = get_station_config(station)
+    station = config["station"]
+    paths = get_station_paths(station)
+    state = load_state(paths["state_file"])
+    queue = load_queue(paths["queue_file"])
+    from birdnet_queue_worker import validate_queue
+    validate_queue(queue, config)
+    for key in ("station", "property"):
+        if state.get(key) is not None and state[key] != config[key]:
+            raise ValueError("Scanner state belongs to another station.")
+    if state.get("source_base_url") not in (None, config["base_url"]):
+        raise ValueError("Scanner state URL does not match station.")
+    old = state.get("highest_seen_detection_id")
+    if old is None and not bootstrap:
+        raise RuntimeError("No baseline. Use --bootstrap explicitly for a new station.")
+    if bootstrap and old is not None:
+        raise RuntimeError("Station already initialized; bootstrap would skip work.")
+    if since_id is not None and (since_id < 0 or bootstrap):
+        raise ValueError("--since-id must be nonnegative and cannot accompany bootstrap.")
     if bootstrap:
-
-        state[
-            "highest_seen_detection_id"
-        ] = current_max_id
-
-        state[
-            "last_scan_at"
-        ] = utc_now()
-
-        save_json(
-            STATE_FILE,
-            state,
-        )
-
-        save_json(
-            QUEUE_FILE,
-            queue,
-        )
-
-        return {
-            "retrieved":
-                len(
-                    valid_detections
-                ),
-
-            "newly_seen": 0,
-
-            "newly_queued": [],
-
-            "total_queue":
-                len(
-                    queue[
-                        "detections"
-                    ]
-                ),
-
-            "bootstrap": True,
-
-            "highest_seen_detection_id":
-                current_max_id,
-        }
-
-    # -------------------------------------------------------------
-    # First run protection
-    # -------------------------------------------------------------
-
-    if highest_seen_id is None:
-
-        state[
-            "highest_seen_detection_id"
-        ] = current_max_id
-
-        state[
-            "last_scan_at"
-        ] = utc_now()
-
-        save_json(
-            STATE_FILE,
-            state,
-        )
-
-        save_json(
-            QUEUE_FILE,
-            queue,
-        )
-
-        return {
-            "retrieved":
-                len(
-                    valid_detections
-                ),
-
-            "newly_seen": 0,
-
-            "newly_queued": [],
-
-            "total_queue":
-                len(
-                    queue[
-                        "detections"
-                    ]
-                ),
-
-            "bootstrap": False,
-
-            "highest_seen_detection_id":
-                current_max_id,
-        }
-
-    # -------------------------------------------------------------
-    # Genuine new detections
-    # -------------------------------------------------------------
-
-    new_detections = [
-        detection
-        for detection
-        in valid_detections
-        if int(
-            detection["id"]
-        ) > highest_seen_id
-    ]
-
-    newly_queued = []
-
-    # Process new records oldest first.
-    new_detections.sort(
-        key=lambda detection:
-            int(
-                detection["id"]
-            )
-    )
-
-    for detection in new_detections:
-
-        detection_id = int(
-            detection["id"]
-        )
-
-        verified = str(
-            detection.get(
-                "verified",
-                "",
-            )
-        ).strip().lower()
-
-        # Only unverified detections enter review queue.
-        if verified != "unverified":
+        detections = get_recent_detections(config["base_url"], limit)
+        pages = 1
+    else:
+        detections, pages = retrieve_complete_listing(config["base_url"], limit, max_pages)
+    floor = since_id if since_id is not None else int(old or 0)
+    maximum = max([int(old or 0)] + [int(d["id"]) for d in detections])
+    new = [] if bootstrap else [d for d in detections if int(d["id"]) > floor]
+    queued = {int(i["detection_id"]) for i in queue["detections"]}
+    added = []
+    for d in sorted(new, key=lambda r: int(r["id"])):
+        if str(d.get("verified", "")).lower() != "unverified" or int(d["id"]) in queued:
             continue
-
-        if detection_id in queued_ids:
-            continue
-
-        record = build_queue_record(
-            detection=detection,
-            island=island,
-        )
-
-        queue[
-            "detections"
-        ].append(
-            record
-        )
-
-        queued_ids.add(
-            detection_id
-        )
-
-        newly_queued.append(
-            record
-        )
-
-    # Advance high-water mark regardless of verification status.
-    if current_max_id > highest_seen_id:
-
-        state[
-            "highest_seen_detection_id"
-        ] = current_max_id
-
-    state[
-        "last_scan_at"
-    ] = utc_now()
-
-    queue[
-        "updated_at"
-    ] = utc_now()
-
-    save_json(
-        STATE_FILE,
-        state,
-    )
-
-    save_json(
-        QUEUE_FILE,
-        queue,
-    )
-
-    return {
-        "retrieved":
-            len(
-                valid_detections
-            ),
-
-        "newly_seen":
-            len(
-                new_detections
-            ),
-
-        "newly_queued":
-            newly_queued,
-
-        "total_queue":
-            len(
-                queue[
-                    "detections"
-                ]
-            ),
-
-        "bootstrap": False,
-
-        "highest_seen_detection_id":
-            state[
-                "highest_seen_detection_id"
-            ],
-    }
-
-
-# ---------------------------------------------------------------------
-# Display
-# ---------------------------------------------------------------------
+        record = build_queue_record(d, config["property"], station)
+        record["source_base_url"] = config["base_url"]
+        queue["detections"].append(record)
+        queued.add(int(d["id"]))
+        added.append(record)
+    queue["updated_at"] = utc_now()
+    # Queue first: interruption after this save can only cause a deduplicated
+    # rescan, never a watermark advancing past unsaved queue entries.
+    save_json(paths["queue_file"], queue)
+    state.update(highest_seen_detection_id=maximum, last_scan_at=utc_now(),
+                 station=station, property=config["property"],
+                 source_base_url=config["base_url"])
+    save_json(paths["state_file"], state)
+    return dict(property=config["property"], station=station,
+                base_url=config["base_url"], retrieved=len(detections),
+                newly_seen=len(new), newly_queued=added,
+                total_queue=len(queue["detections"]), bootstrap=bootstrap,
+                highest_seen_detection_id=maximum, pages=pages)
 
 def print_scan_summary(
     result,
 ):
-    """Print the scanner result."""
-
+    """Print scanner results."""
     print("=" * 72)
     print("BIRDNET-GO AUTOMATIC DETECTION SCANNER")
     print("=" * 72)
-
+    print(
+        "Property:",
+        result[
+            "property"
+        ],
+    )
+    print(
+        "Station:",
+        result[
+            "station"
+        ],
+    )
     print(
         "BirdNET instance:",
-        BIRDNET_BASE_URL,
+        result[
+            "base_url"
+        ],
     )
-
     print(
         "Mode:",
         (
@@ -627,28 +288,24 @@ def print_scan_summary(
             else "NORMAL"
         ),
     )
-
     print(
-        "Recent detections retrieved:",
+        "Detections inspected across pages:",
         result[
             "retrieved"
         ],
     )
-
     print(
         "Highest detection ID seen:",
         result[
             "highest_seen_detection_id"
         ],
     )
-
     print(
         "Genuinely new detections:",
         result[
             "newly_seen"
         ],
     )
-
     print(
         "New detections added to queue:",
         len(
@@ -657,105 +314,86 @@ def print_scan_summary(
             ]
         ),
     )
-
     print(
         "Total detections in review queue:",
         result[
             "total_queue"
         ],
     )
-
     if result[
         "newly_queued"
     ]:
-
         print()
         print("NEW REVIEW QUEUE ITEMS")
         print("-" * 72)
-
         for item in result[
             "newly_queued"
         ]:
-
             print(
                 f"ID {item['detection_id']} | "
                 f"{item['common_name']} | "
                 f"{item['confidence']} | "
-                f"{item['island']}"
+                f"{item['station']}"
             )
-
     print()
     print(
         "BirdNET-Go records modified: NO"
     )
-
     print(
         "Gemini calls made: NO"
     )
-
     print("=" * 72)
-
-
 # ---------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------
-
 def parse_args():
-    """Parse scanner command-line arguments."""
-
+    """Parse scanner CLI arguments."""
     parser = argparse.ArgumentParser(
         description=(
-            "Scan BirdNET-Go for genuinely new "
-            "unverified detections."
+            "Scan one BirdNET-Go station "
+            "for genuinely new detections."
         )
     )
-
     parser.add_argument(
-        "--island",
+        "--station",
         required=True,
         help=(
-            "Property/island associated with "
-            "this BirdNET-Go deployment."
+            "BirdNET station key, for example "
+            "CEMPEDAK_01 or CEMPEDAK_02."
         ),
     )
-
     parser.add_argument(
         "--limit",
         type=int,
-        default=100,
+        default=200,
         help=(
-            "Number of recent BirdNET-Go detections "
-            "to inspect. Default: 100."
+            "Number of recent detections "
+            "to inspect. Default: 200."
         ),
     )
-
     parser.add_argument(
         "--bootstrap",
         action="store_true",
         help=(
-            "Set the current highest detection ID "
-            "as the starting baseline."
+            "Set the station's current highest "
+            "detection ID as its baseline."
         ),
     )
-
+    parser.add_argument("--max-pages", type=int, default=1000)
+    parser.add_argument("--since-id", type=int, help="One-time recovery: queue unverified IDs above this ID, deduplicated.")
     return parser.parse_args()
-
-
 def main():
-    """Run the BirdNET-Go automatic scanner."""
-
+    """Run the station-aware scanner."""
     args = parse_args()
-
     result = scan_detections(
-        island=args.island,
+        station=args.station,
         limit=args.limit,
         bootstrap=args.bootstrap,
+        max_pages=args.max_pages,
+        since_id=args.since_id,
     )
-
     print_scan_summary(
         result
     )
-
-
 if __name__ == "__main__":
     main()

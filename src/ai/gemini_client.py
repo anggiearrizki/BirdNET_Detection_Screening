@@ -62,8 +62,14 @@ GEMINI_RESPONSE_SCHEMA = {
         "audio_evidence": {
             "type": "string",
             "description": (
-                "Short explanation of what in the supplied recording supports "
-                "the audio assessment. Do not invent vocal characteristics."
+                "Complete species-specific explanation of the attached "
+                "recording for BirdNET Notes. One coherent paragraph, "
+                "normally 100-180 words where supported. Describe audible "
+                "characteristics, their relationship to the proposed "
+                "species, relevant recording conditions, and acoustic "
+                "uncertainty. No register context, technical metadata, "
+                "workflow commentary, headings, or generic disclaimers. "
+                "Do not invent sounds or measurements."
             ),
         },
 

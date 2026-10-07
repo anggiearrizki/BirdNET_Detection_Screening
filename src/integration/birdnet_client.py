@@ -49,10 +49,16 @@ def get_base_url():
 
 def get_detection(
     detection_id,
+    base_url=None,
 ):
     """Retrieve one BirdNET-Go detection record."""
 
-    base_url = get_base_url()
+    if base_url is None:
+        base_url = get_base_url()
+    else:
+        base_url = str(
+            base_url
+        ).rstrip("/")
 
     url = (
         f"{base_url}"
@@ -93,10 +99,16 @@ def get_detection(
 
 def get_detection_audio(
     detection_id,
+    base_url=None,
 ):
     """Retrieve the audio bytes associated with one detection."""
 
-    base_url = get_base_url()
+    if base_url is None:
+        base_url = get_base_url()
+    else:
+        base_url = str(
+            base_url
+        ).rstrip("/")
 
     url = (
         f"{base_url}"
@@ -211,11 +223,13 @@ def _extension_from_content_type(
 def save_detection_audio(
     detection_id,
     output_dir=DEFAULT_AUDIO_DIR,
+    base_url=None,
 ):
     """Download and save one BirdNET-Go detection audio file."""
 
     audio = get_detection_audio(
-        detection_id
+        detection_id,
+        base_url=base_url,
     )
 
     output_dir = Path(
