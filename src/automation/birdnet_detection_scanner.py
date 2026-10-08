@@ -246,6 +246,11 @@ def scan_detections(station, limit=200, bootstrap=False, max_pages=1000,
     state.update(highest_seen_detection_id=maximum, last_scan_at=utc_now(),
                  station=station, property=config["property"],
                  source_base_url=config["base_url"])
+    if not bootstrap:
+        from birdnet_review_policy import build_history
+        history = build_history(detections, config)
+        history["generated_at"] = utc_now()
+        save_json(paths["station_dir"] / "species_history.json", history)
     save_json(paths["state_file"], state)
     return dict(property=config["property"], station=station,
                 base_url=config["base_url"], retrieved=len(detections),

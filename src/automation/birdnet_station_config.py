@@ -60,4 +60,12 @@ def get_station_config(
             f"No base URL configured for {station}."
         )
 
+    latitude = os.getenv(f"BIRDNET_{station}_LATITUDE", "").strip()
+    longitude = os.getenv(f"BIRDNET_{station}_LONGITUDE", "").strip()
+    if bool(latitude) != bool(longitude):
+        raise ValueError("Configure both station latitude and longitude, or neither.")
+    config["latitude"] = float(latitude) if latitude else None
+    config["longitude"] = float(longitude) if longitude else None
+    if latitude and not (-90 <= config["latitude"] <= 90 and -180 <= config["longitude"] <= 180):
+        raise ValueError("Station coordinates are outside valid ranges.")
     return config

@@ -112,7 +112,7 @@ def next_review_item(station):
                     "already recorded and requires manual inspection."
                 )
                 continue
-            if review.get("status") == "taxonomy_review_required":
+            if review.get("status") in {"taxonomy_review_required", "screening_skipped_known_species", "eligibility_review_required"}:
                 continue
         return detection_id, "needs_review"
     return None
@@ -206,6 +206,9 @@ def watch(args):
                         / f"detection_{detection_id}_review.json"
                     )
                     review = read_json(review_path)
+                    if review.get("status") != "review_note_ready":
+                        print("No note to post:", review.get("status"))
+                        continue
                     if (
                         args.post_notes
                         and review.get("status") == "review_note_ready"

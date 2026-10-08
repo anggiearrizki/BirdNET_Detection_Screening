@@ -102,6 +102,12 @@ def review_package(station, detection_id, run_gemini=False, model=None):
     birdnet_data["detection_confidence"] = birdnet_data.get("confidence")
     birdnet_data["detection_datetime"] = birdnet_data.get("datetime")
 
+    # Explicitly configured, verified station coordinates take precedence.
+    if config.get("latitude") is not None:
+        birdnet_data["latitude"] = config["latitude"]
+        birdnet_data["longitude"] = config["longitude"]
+        birdnet_data["coordinate_source"] = "configured_station"
+
     packet = build_candidate_evidence_packet(
         scientific_name=candidate["scientific_name"],
         common_name=candidate.get("common_name"),
@@ -165,6 +171,21 @@ def review_package(station, detection_id, run_gemini=False, model=None):
 
     if packet["register_check"].get("status") != "completed":
         raise ValueError("Register check has not completed.")
+
+    from birdnet_review_policy import review_eligibility
+    eligibility = review_eligibility(
+        packet["register_check"], detection, config,
+        paths["package_dir"].parent / "species_history.json",
+    )
+    result["review_eligibility"] = eligibility
+    if not eligibility["eligible"]:
+        result["status"] = ("eligibility_review_required" if eligibility.get("requires_review")
+                            else "screening_skipped_known_species")
+        save_json(output_path, result)
+        print("Gemini skipped:", eligibility["reason"])
+        print("Gemini generation requests: 0")
+        return
+    save_json(output_path, result)
 
     if not run_gemini:
         print("Gemini generation requests: 0")
