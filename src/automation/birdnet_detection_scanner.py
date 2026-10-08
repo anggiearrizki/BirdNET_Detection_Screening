@@ -199,7 +199,7 @@ def load_queue(queue_file):
 # Scanner
 # ---------------------------------------------------------------------
 def scan_detections(station, limit=200, bootstrap=False, max_pages=1000,
-                    since_id=None):
+                    since_id=None, recorded_since=None):
     if limit <= 0 or max_pages <= 0:
         raise ValueError("Page size and page limit must be positive.")
     config = get_station_config(station)
@@ -229,9 +229,16 @@ def scan_detections(station, limit=200, bootstrap=False, max_pages=1000,
     floor = since_id if since_id is not None else int(old or 0)
     maximum = max([int(old or 0)] + [int(d["id"]) for d in detections])
     new = [] if bootstrap else [d for d in detections if int(d["id"]) > floor]
+    candidates = new
+    if recorded_since is not None:
+        if bootstrap:
+            raise ValueError("A recent window cannot accompany bootstrap.")
+        from birdnet_recent_window import recording_time
+        # Backfill recent recordings even if an earlier baseline passed them.
+        candidates = [d for d in detections if recording_time(d) >= recorded_since]
     queued = {int(i["detection_id"]) for i in queue["detections"]}
     added = []
-    for d in sorted(new, key=lambda r: int(r["id"])):
+    for d in sorted(candidates, key=lambda r: int(r["id"])):
         if str(d.get("verified", "")).lower() != "unverified" or int(d["id"]) in queued:
             continue
         record = build_queue_record(d, config["property"], station)

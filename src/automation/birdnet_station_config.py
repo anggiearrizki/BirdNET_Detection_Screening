@@ -34,6 +34,16 @@ STATIONS = {
             "",
         ).rstrip("/"),
     },
+
+        "NIKOI_MAIN": {
+        "property": "Nikoi",
+        "station": "NIKOI_MAIN",
+        "display_name": "Nikoi Main",
+        "base_url": os.getenv(
+            "BIRDNET_NIKOI_MAIN_BASE_URL",
+            "",
+        ).rstrip("/"),
+    },
 }
 
 

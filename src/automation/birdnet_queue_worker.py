@@ -231,6 +231,9 @@ def process_queue(
             if int(item["detection_id"]) not in target_ids:
                 continue
         selected.append(item)
+    if detection_ids is not None:
+        order = {int(value): index for index, value in enumerate(detection_ids)}
+        selected.sort(key=lambda item: order[int(item["detection_id"])])
     if max_items is not None:
         selected = selected[:max_items]
     prepared = []

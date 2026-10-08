@@ -12,6 +12,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
+from birdnet_recent_window import recent_ids
 from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 AUTOMATION_DIR = Path(__file__).resolve().parent
@@ -54,7 +56,7 @@ def run_stage(script_name, station, detection_id, extra_args=()):
             f"{script_name} failed for detection {detection_id}. "
             "Watcher stopped; saved results and attempt records are preserved."
         )
-def next_review_item(station):
+def next_review_item(station, selected_ids=None):
     """Find prepared work without repeating recorded attempts."""
     config = get_station_config(station)
     package_dir = Path(get_worker_paths(station)["package_dir"])
@@ -63,7 +65,10 @@ def next_review_item(station):
         suffix = path.stem.removeprefix("detection_")
         if suffix.isdigit():
             packages.append((int(suffix), path))
-    for detection_id, package_path in sorted(packages):
+    order = None if selected_ids is None else {value: index for index, value in enumerate(selected_ids)}
+    if order is not None:
+        packages = [item for item in packages if item[0] in order]
+    for detection_id, package_path in sorted(packages, key=lambda item: item[0] if order is None else order[item[0]]):
         write_path = (
             package_dir / f"detection_{detection_id}_writeback.json"
         )
@@ -145,12 +150,15 @@ def watch(args):
     station = config["station"]
     cycle = 0
     items_handled = 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=args.recent_days)
+              if args.recent_days else None)
     print("=" * 72)
     print("BIRDNET AUTOMATED SCREENING WATCHER")
     print("=" * 72)
     print("Station:", station)
     print("Property:", config["property"])
     print("BirdNET:", config["base_url"])
+    print("Recording window starts:", cutoff.isoformat() if cutoff else "All queued recordings")
     print("Gemini enabled:", args.run_gemini)
     print("Note posting enabled:", args.post_notes)
     print("Maximum review items for this entire run:", args.max_reviews)
@@ -167,26 +175,33 @@ def watch(args):
                     limit=args.limit,
                     bootstrap=False,
                     max_pages=args.max_pages,
+                    recorded_since=cutoff,
                 )
                 print_scan_summary(result)
             except requests.RequestException as exc:
                 print("Scan connection failed:", type(exc).__name__)
                 print("Existing queued work will still be processed.")
             sync_completion(station)
+            selected_ids = None
+            if cutoff is not None:
+                queue_path = get_worker_paths(station)["queue_file"]
+                selected_ids = recent_ids(read_json(queue_path)["detections"], cutoff)
+                print("Recent queued recordings:", len(selected_ids))
             # Detect blocked posting records before downloading more audio.
             if args.run_gemini:
-                next_review_item(station)
+                next_review_item(station, selected_ids)
             worker_result = process_queue(
                 station=station,
                 max_items=args.max_items,
                 max_attempts=args.max_attempts,
+                detection_ids=selected_ids,
             )
             print_worker_summary(worker_result)
             if args.run_gemini:
                 for _ in range(args.reviews_per_cycle):
                     if items_handled >= args.max_reviews:
                         break
-                    selected = next_review_item(station)
+                    selected = next_review_item(station, selected_ids)
                     if selected is None:
                         print("No eligible review items.")
                         break
@@ -258,6 +273,7 @@ def parse_args():
         description="Scan, prepare, review, and optionally post BirdNET notes."
     )
     parser.add_argument("--station", required=True)
+    parser.add_argument("--recent-days", type=positive_int, help="Backfill and process recordings from the last N days, newest first; preserve older work.")
     parser.add_argument("--max-pages", type=positive_int, default=1000)
     parser.add_argument("--station-credentials", action="store_true")
     parser.add_argument("--limit", type=positive_int, default=200)
