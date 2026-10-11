@@ -1,306 +1,258 @@
 # BirdNET Detection Screening
 
-> **An evidence-based, human-in-the-loop framework for systematically assessing and prioritising unusual BirdNET-Go detections for further investigation and validation.**
+An evidence-based, human-in-the-loop workflow for screening unusual BirdNET-Go detections on Cempedak and Nikoi and prioritising them for acoustic validation.
 
-This project develops a reproducible workflow for **screening, validating, and monitoring BirdNET-Go detections** using **taxonomic reconciliation, local species references, detection history, spatiotemporal evidence, and AI-assisted contextual assessment**.
+## Current implementation
 
-The framework is being developed for bird monitoring on **Cempedak and Nikoi Islands**, with the longer-term aim of supporting an operational screening layer **within the existing BirdNET-Go–EarthRanger workflow**.
+The Python workflow has been tested locally across three stations. Once a batch is started, it discovers detections, retrieves metadata and audio, resolves taxonomy, checks an exported property species list and retained station history, sends eligible recordings to Gemini, validates the response, and posts an acoustic explanation to BirdNET Notes.
 
----
+Final species verification remains human-controlled. Comment requests do not include verification or lock changes. Hosted continuous operation is not deployed yet.
 
-## At a Glance
+| Component | Current behaviour | Remaining work |
+|---|---|---|
+| Detection scanner | Station-specific state, paginated metadata retrieval, deduplicated queues and recording-date backfill | Demonstrate complete coverage of earlier recordings |
+| Preparation worker | Saves metadata and audio with provenance and checksum checks; bounded preparation attempts | Reduce downloads for recordings that will be skipped |
+| Taxonomy and local reference | Resolves taxa and checks an exported property list | Synchronise with the current Flora and Fauna platform; strengthen name matching across history |
+| Detection history | Tracks first retained detection IDs by scientific name | Recurrence, confidence summaries and distinct-candidate prioritisation |
+| Evidence packet | Combines available taxonomy, register and recording context | Geographic occurrence evidence and richer historical features |
+| Location | Includes configured station coordinates in new review packets | Explicit GeoModel evidence and independent geographic checks |
+| Gemini | Analyses attached audio and returns a structured assessment | Evaluate results against human outcomes |
+| BirdNET writeback | Posts the saved audio explanation as a comment | Reliable unattended authentication and note-content readback |
+| Human review | Local review queue/report utility; final verification stays manual | Decision capture and agreed routing |
+| EarthRanger | Mapping preview exists | Live event enrichment, record matching and notifications |
+| Evaluation and analytics | Framework documented | Outcome store, calibration, validated trends and reporting |
 
-| Component | Role |
-|---|---|
-| **BirdNET-Go** | Produces acoustic species detections |
-| **Taxonomy** | Resolves naming and species-identity mismatches |
-| **Local reference** | Checks whether a taxon is currently documented on Cempedak and Nikoi |
-| **Detection history** | Measures repetition across time and stations |
-| **GeoModel** | Provides geographic and seasonal context |
-| **eBird** | Adds supplementary occurrence evidence |
-| **Rule-based screening** | Generates reproducible evidence flags |
-| **AI assessment** | Interprets combined or conflicting evidence |
-| **Human review** | Provides final validation and review outcome |
+## Stations
 
----
+| Station ID | Property | BirdNET-Go URL | Configured latitude | Configured longitude |
+|---|---|---|---:|---:|
+| `CEMPEDAK_MAIN_KAMONG` | Cempedak | http://161.248.117.178:8080 | 0.845 | 104.704 |
+| `CEMPEDAK_SOUTH_SIDE` | Cempedak | http://161.248.117.178:8081 | 0.843 | 104.703 |
+| `NIKOI_MAIN` | Nikoi | http://161.248.117.22:8080 | 1.052 | 104.709 |
 
-## Core Principle
+Each station has its own detection ID sequence, scanner state, audio directory, queue and review packages. Always identify a recording by station and detection ID together.
 
-> **Taxonomy establishes identity.**  
-> **Data establish evidence.**  
-> **Rules establish reproducible signals.**  
-> **AI interprets context.**  
-> **Humans establish biological truth.**
+Coordinates describe the configured recording station, not the exact position of a calling bird. They currently provide context to Gemini; they do not establish species range or presence.
 
-The system is designed to answer:
+## Screening eligibility
 
-> **Does this detection deserve human attention?**
+The implemented policy allows review when a resolved taxon is absent from the exported property list, or when an already-listed taxon represents its first detection in the retained station history. Other established-species recordings are skipped. Missing or unresolved evidence requires inspection rather than an unsupported novelty decision.
 
-It is **not** designed to automatically determine whether a species is definitively present or absent.
+This is not yet a strict property-wide "unlisted species only" filter. First retained station detections can qualify even when the species is already on the property list. The first retained ID is a history proxy, not proof of the first biological occurrence. History matching does not yet provide comprehensive synonym reconciliation.
 
----
+Repeated recordings of an unlisted species can each qualify. Distinct-candidate prioritisation remains to be implemented so a batch is not dominated by one species.
 
-## Overall System Design
+The Flora and Fauna platform at https://species.bintanmpa.com/ remains the intended source of truth. Screening currently uses a local export, which can become stale. Absence from that export does not prove absence from the current platform or the island.
+
+## Current workflow
 
 ```mermaid
 flowchart TD
-    A[BirdNET-Go Detection] --> B[Taxonomic Reconciliation]
-
-    B --> C[Local Species Reference Check]
-    C --> D[Detection History Analysis]
-
-    D --> E1[BirdNET GeoModel]
-    D --> E2[External Occurrence Evidence]
-
-    E1 --> F[Structured Evidence Packet]
-    E2 --> F
-
-    F --> G[Deterministic Screening]
-    G --> H[AI Contextual Assessment]
-    H --> I[Review Priority & Recommended Action]
-
-    I --> J[EarthRanger Event Enrichment]
-    J --> K[Reviewer / Expert Notification]
-    K --> L[Human Acoustic Validation]
-
-    L --> M[Validation Outcome]
-
-    M --> M1[Confirmed]
-    M --> M2[Rejected]
-    M --> M3[Unresolved]
-
-    M1 --> N1[Validated Detection Dataset]
-
-    M1 --> N2[Validation Outcome Store]
-    M2 --> N2
-    M3 --> N2
-
-    N2 --> Q[Evaluation & Calibration]
-
-    N1 --> O[Monitoring & Trend Analytics]
-
-    O --> O1[Temporal Trends]
-    O --> O2[Species Occurrence Patterns]
-    O --> O3[Station-Level Patterns]
-    O --> O4[Environmental Context]
-
-    O1 --> P[Visualisation & Conservation Reporting]
-    O2 --> P
-    O3 --> P
-    O4 --> P
+    A[Station detection queue] --> B[Metadata and audio package]
+    B --> C[Taxonomy and reference checks]
+    C --> D{Eligible for screening?}
+    D -->|No| E[Save skip or inspection status]
+    D -->|Yes| F[Evidence packet and station context]
+    F --> G[Gemini audio assessment]
+    G --> H[Validate and save review]
+    H --> I[Optional BirdNET Notes posting]
+    I --> J[Human acoustic review]
 ```
 
----
+BirdNET Notes contain a species-specific acoustic explanation. Operational metadata, register checks and attempt records remain in local review files. A posted note is an assessment, not a confirmed species record.
 
-## What the Framework Is Designed to Do
+## Intended validation and reporting workflow
 
-The pipeline aims to:
+The original framework remains the longer-term design. Geographic evidence, operational EarthRanger integration and the outcome-driven reporting stages below are not yet complete.
 
-- identify unusual detections that warrant investigation;
-- distinguish **potential new local records** from already documented taxa;
-- minimise false novelty flags caused by taxonomy or naming mismatches;
-- combine local, temporal, geographic, and external occurrence evidence;
-- prioritise detections for acoustic review;
-- use AI as a **contextual triage layer rather than a final species validator**; and
-- retain human validation outcomes for later evaluation and calibration.
-
----
-
-## Important Interpretation Rules
-
-### A BirdNET detection is not a confirmed species record
-
-BirdNET-Go provides an acoustic classification.
-
-A detection may later be:
-
-```text
-confirmed
-rejected
-unresolved
+```mermaid
+flowchart TD
+    A[BirdNET-Go detection] --> B[Taxonomic reconciliation]
+    B --> C[Local reference and detection history]
+    C --> D[BirdNET GeoModel evidence]
+    C --> E[External occurrence evidence]
+    D --> F[Structured evidence packet]
+    E --> F
+    F --> G[Deterministic screening]
+    G --> H[AI contextual assessment]
+    H --> I[Review priority and recommended action]
+    I --> N[BirdNET review note]
+    I --> J[EarthRanger event enrichment]
+    J --> K[Reviewer notification]
+    K --> L[Human acoustic validation]
+    N --> L
+    L --> M{Validation outcome}
+    M -->|Confirmed| V[Validated detection dataset]
+    M -->|Confirmed, rejected or unresolved| O[Validation outcome store]
+    O --> Q[Evaluation and calibration]
+    V --> T[Monitoring and trend analytics]
+    T --> P[Visualisation and conservation reporting]
 ```
 
-Final biological validation remains dependent on human review.
+Planned analytics include temporal trends, species occurrence patterns, station patterns and environmental context. Recording effort and uncertainty must be considered; detection activity alone does not establish population abundance.
 
-### `Not listed` does not mean `absent`
+## Setup and configuration
 
-If a taxonomically reconciled species is not found in the supplied Cempedak and Nikoi fauna reference, the system records:
+Create and activate a Python virtual environment, then install the repository dependencies:
 
-```text
-not_listed_in_current_local_reference
+```bat
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -r requirements.txt
 ```
 
-This means only that the taxon is not present in the current supplied reference.
+Existing reference data and evidence-module configuration are also required. Installing packages alone does not supply the property lists or taxonomy resources.
 
-It does **not** automatically mean that the species is biologically absent from the island.
+Configure `.env` locally. Use decimal points for coordinates and the exact station IDs in variable names:
 
-### Confidence is supporting evidence
+```dotenv
+GEMINI_API_KEY=replace_with_authorised_key
 
-BirdNET confidence is retained as a model output and interpreted alongside other evidence.
+BIRDNET_CEMPEDAK_MAIN_KAMONG_BASE_URL=http://161.248.117.178:8080
+BIRDNET_CEMPEDAK_MAIN_KAMONG_SESSION_COOKIE=replace_with_session_value
+BIRDNET_CEMPEDAK_MAIN_KAMONG_CSRF_TOKEN=replace_with_csrf_value
+BIRDNET_CEMPEDAK_MAIN_KAMONG_LATITUDE=0.845
+BIRDNET_CEMPEDAK_MAIN_KAMONG_LONGITUDE=104.704
 
-It is **not** treated as the probability that the species is biologically present.
+BIRDNET_CEMPEDAK_SOUTH_SIDE_BASE_URL=http://161.248.117.178:8081
+BIRDNET_CEMPEDAK_SOUTH_SIDE_SESSION_COOKIE=replace_with_session_value
+BIRDNET_CEMPEDAK_SOUTH_SIDE_CSRF_TOKEN=replace_with_csrf_value
+BIRDNET_CEMPEDAK_SOUTH_SIDE_LATITUDE=0.843
+BIRDNET_CEMPEDAK_SOUTH_SIDE_LONGITUDE=104.703
 
----
-
-## Review Categories
-
-The screening process produces one of four operational categories:
-
-| Category | Meaning |
-|---|---|
-| **Routine** | No major anomaly currently requires additional attention |
-| **Review** | Further human investigation is warranted |
-| **Priority Review** | Unusual, potentially significant, or conflicting evidence requires prompt review |
-| **Data Issue** | Reliable screening cannot continue because important information is unresolved |
-
-These categories represent **review priority**, not species correctness.
-
-A `Priority Review` may ultimately be confirmed, rejected, or remain unresolved.
-
----
-
-## Project Architecture
-
-```text
-src/
-├── ingestion/          # BirdNET detection input
-├── taxonomy/           # Name and taxonomy reconciliation
-├── local_reference/    # Cempedak / Nikoi reference lookup
-├── evidence/           # Detection history, GeoModel, eBird
-├── screening/          # Deterministic screening logic
-├── ai/                 # Contextual AI assessment
-├── routing/            # EarthRanger / reviewer notification
-├── validation/         # Human outcomes and feedback
-├── analytics/          # Longitudinal and trend analysis
-└── reporting/          # Visualisation and conservation outputs
+BIRDNET_NIKOI_MAIN_BASE_URL=http://161.248.117.22:8080
+BIRDNET_NIKOI_MAIN_SESSION_COOKIE=replace_with_session_value
+BIRDNET_NIKOI_MAIN_CSRF_TOKEN=replace_with_csrf_value
+BIRDNET_NIKOI_MAIN_LATITUDE=1.052
+BIRDNET_NIKOI_MAIN_LONGITUDE=104.709
 ```
 
----
+Use `--station-credentials` for posting with these station-specific keys. Older manual runners may still use the legacy `BIRDNET_BASE_URL`, `BIRDNET_SESSION_COOKIE` and `BIRDNET_CSRF_TOKEN`; check their usage before removing them.
+
+## Running the workflow
+
+Run commands from the repository root. Run only one watcher per station and avoid concurrent scanner, worker or posting processes against the same station's files.
+
+### Initialise a new station
+
+```bat
+python src/automation/birdnet_detection_scanner.py --station NIKOI_MAIN --limit 200 --bootstrap
+```
+
+Bootstrap establishes a baseline without queuing existing recordings. Do not bootstrap an already-initialised station to resume work.
+
+### Scan and prepare without Gemini or posting
+
+```bat
+python src/automation/birdnet_detection_watcher.py --station CEMPEDAK_MAIN_KAMONG --max-cycles 1 --max-items 20
+```
+
+### Review September and earlier recordings
+
+```bat
+python src/automation/birdnet_detection_watcher.py --station CEMPEDAK_MAIN_KAMONG --before-date 2026-10-01 --max-cycles 10 --max-items 20 --reviews-per-cycle 20 --run-gemini --model gemini-3.8-flash --post-notes --max-reviews 20 --station-credentials
+```
+
+Replace the station ID to run South or Nikoi. `--before-date` is exclusive midnight in station time (UTC+7): this example includes September and earlier recordings, not only September. Selection uses recording timestamps rather than assuming detection IDs indicate recording dates.
+
+### Review recent recordings
+
+```bat
+python src/automation/birdnet_detection_watcher.py --station NIKOI_MAIN --recent-days 3 --max-cycles 10 --max-items 20 --reviews-per-cycle 20 --run-gemini --model gemini-3.8-flash --post-notes --max-reviews 20 --station-credentials
+```
+
+`--recent-days` uses a fixed cutoff captured at run start. Newest recordings are selected first. Older work is preserved.
+
+### Review or post a prepared recording separately
+
+```bat
+python src/automation/birdnet_package_review.py --station NIKOI_MAIN --detection-id 10712
+python src/automation/birdnet_package_review.py --station NIKOI_MAIN --detection-id 10712 --run-gemini --model gemini-3.8-flash
+python src/automation/birdnet_post_review_note.py --station NIKOI_MAIN --detection-id 10712 --station-credentials
+```
+
+The first command prepares evidence without generation. Saved generation attempts prevent automatic repeat calls; failures can require inspection. Posting uses the saved review and makes no Gemini call.
+
+### Limits and completion
+
+- `--max-items`: maximum preparations per cycle.
+- `--reviews-per-cycle`: maximum review-stage items inspected per cycle; skips can consume these slots.
+- `--max-reviews`: completed review-item limit for the entire run, not a unique-species count.
+- `--max-cycles`: scan-cycle limit.
+- `--interval`: wait between cycles; total discovery-to-note latency also includes processing and backlog.
+
+Reaching a review or cycle limit means the batch finished, not that the selected date range has been fully screened. Completion must account for skipped, pending, failed and blocked items as well as accepted posts.
+
+The watcher polls BirdNET; it is not currently triggered by BirdNET notifications or a webhook. Omitting `--max-cycles` does not remove the review-item limit.
+
+## Recovery and writeback interpretation
+
+Queues, packages, generation-attempt records and writeback records are retained across restarts. Completed work is reused, and ambiguous outcomes are blocked rather than blindly retried.
+
+A POST rejected with HTTP 401 is recorded as `authentication_rejected`. Refresh the selected station's credentials and resume: the saved Gemini result is retained. A 401 establishes authentication rejection; it does not by itself prove expiry.
+
+`post_accepted_status_unchanged` means BirdNET accepted the POST and subsequent metadata checks found verification and lock statuses unchanged. It is not a note-text readback. The Notes tab can be checked to confirm visibility. Accepted writes with failed metadata readback require reconciliation; unknown write outcomes require inspection before repeat posting.
+
+## Local validation snapshot: 9 October 2026
+
+The supplied local result listing contains 86 accepted writebacks across all tests: 55 Main, 13 South and 18 Nikoi. Of these, 32 cover recordings dated 30 September: 24 Main, one South and seven Nikoi. Coordinates are present in 31 of those September review files; one reused an earlier assessment.
+
+These counts are recording reviews, not new species counts or confirmation of species presence. They do not establish that the entire September-and-earlier backlog is complete. Nikoi detection 10712's note was also checked visually in BirdNET; its Gemini assessment remained uncertain.
+
+## Requirements arising from review feedback
+
+- Focus expensive screening on relevant new candidates and clarify property-wide versus station-history eligibility.
+- Continue September and earlier recordings and measure coverage explicitly.
+- Check the current Flora and Fauna list before manual additions. Include BirdNET URLs, acoustic-only provenance and identification uncertainty; do not describe records as visually observed.
+- Keep false-positive decisions human-confirmed until the status-update process is agreed.
+- Treat "ignore this species" as a separate decision affecting future detections, not as an individual-record rejection.
+- Preserve the Flora and Fauna platform as the source of truth.
+
+## Deployment discussion
+
+The local workflow automates a started batch. It is not yet deployed as a continuously operated service, and cloud/Cloudflare deployment access has not yet been established.
+
+Discuss the following with the infrastructure owner before selecting a deployment target:
+
+1. A runtime capable of running the existing Python code, or an agreed adaptation to the existing platform.
+2. Persistent storage and migration of station state, queues, reviews and attempt records so completed work is not repeated.
+3. Secure configuration for Gemini and separate BirdNET station credentials.
+4. Reliable unattended BirdNET authentication; current session-cookie failures remain a blocker.
+5. Deployment permissions, logs, automatic restart, monitoring and operational ownership.
+6. Network access to each station and external services, plus generation budget and processing limits.
+
+Cloudflare account access alone is not a deployment design. Confirm the execution and storage approach with Ollie before assuming the current watcher can run unchanged there.
+
+## Remaining roadmap
+
+- [ ] Reliable unattended authentication and hosted operation.
+- [ ] Distinct-candidate prioritisation and earlier-record completion tracking.
+- [ ] Live Flora and Fauna reference synchronisation and reviewed manual additions.
+- [ ] Richer detection-history features and explicit BirdNET GeoModel evidence.
+- [ ] GBIF occurrence checks using station coordinates, with dates, source links and quality flags; eBird remains an optional later source.
+- [ ] Broader deterministic screening and operational priority routing.
+- [ ] EarthRanger enrichment and reviewer notifications.
+- [ ] Human outcome capture: confirmed, rejected and unresolved.
+- [ ] Evaluation against human outcomes and threshold calibration.
+- [ ] Validated monitoring datasets, effort-aware trends and conservation reporting.
+
+External occurrence checks must distinguish regional plausibility from island presence. No nearby records is insufficient evidence, not proof of absence. These geographic checks are planned, not currently implemented in the review workflow.
 
 ## Documentation
 
-Detailed methodology is maintained separately:
+- [Framework](docs/framework.md)
+- [Data sources](docs/data_sources.md)
+- [Taxonomy strategy](docs/taxonomy_strategy.md)
+- [Decision logic](docs/decision_logic.md)
+- [Validation plan](docs/validation_plan.md)
+- [EarthRanger mapping](docs/earthranger_event_mapping.md)
 
-| Document | Contents |
-|---|---|
-| [`framework.md`](docs/framework.md) | Overall screening framework and system design |
-| [`data_sources.md`](docs/data_sources.md) | Data sources, intended use, and limitations |
-| [`taxonomy_strategy.md`](docs/taxonomy_strategy.md) | Taxonomic reconciliation and name-mismatch handling |
-| [`decision_logic.md`](docs/decision_logic.md) | How evidence is converted into a review decision |
-| [`validation_plan.md`](docs/validation_plan.md) | Evaluation, calibration, and comparison strategy |
+These documents describe the intended methodology; use the current implementation table above to distinguish operational features from plans.
 
----
+## Data and credentials
 
-## Development Roadmap
+`.env`, virtual environments, raw/reference/processed project data and generated outputs are excluded by `.gitignore`. Never commit credentials. Preserve operational state securely when moving to hosting; a clean code checkout does not contain the completed-review ledger.
 
-### Phase 1: Framework
+## Evaluation principle
 
-- [x] Define screening framework
-- [x] Document data-source roles
-- [x] Define taxonomy and name-reconciliation strategy
-- [x] Define decision logic
-- [x] Define validation approach
-
-### Phase 2: Local Reference & Taxonomy
-
-- [ ] Ingest Cempedak and Nikoi local species reference
-- [ ] Preserve raw source names
-- [ ] Build taxonomic crosswalk
-- [ ] Resolve aliases, synonyms, and naming mismatches
-- [ ] Generate local-reference status
-
-### Phase 3: Evidence Construction
-
-- [ ] Reproduce the existing BirdNET candidate-validation workflow
-- [ ] Add detection-history features
-- [ ] Integrate BirdNET GeoModel
-- [ ] Integrate eBird occurrence evidence
-- [ ] Generate structured evidence packets
-
-### Phase 4: Screening
-
-- [ ] Implement deterministic screening baseline
-- [ ] Convert the original Tier logic into reproducible evidence rules
-- [ ] Prototype AI contextual assessment
-- [ ] Compare rule-based and AI-assisted screening
-
-### Phase 5: Operational Integration
-
-- [ ] Connect screening outputs with EarthRanger
-- [ ] Update or enrich EarthRanger events with screening results
-- [ ] Add reviewer notification workflow
-- [ ] Store human validation outcomes
-- [ ] Calibrate thresholds using validated records
-
-### Phase 6: Monitoring & Trend Analytics
-
-- [ ] Build a validated longitudinal detection dataset
-- [ ] Analyse detection activity across species, stations, and time
-- [ ] Account for recording effort where possible
-- [ ] Examine temporal and seasonal patterns
-- [ ] Assess spatial and station-level detection patterns
-- [ ] Incorporate relevant environmental context
-- [ ] Evaluate which indicators are suitable for longer-term monitoring
-
-### Phase 7: Visualisation & Conservation Reporting
-
-- [ ] Develop interpretable monitoring visualisations
-- [ ] Communicate confidence and supporting evidence alongside trends
-- [ ] Distinguish detection activity from population inference
-- [ ] Develop conservation-relevant indicators
-- [ ] Relate monitoring outputs to Cempedak and Nikoi conservation objectives
-
----
-
-## Current Status
-
-**Core screening framework defined; implementation beginning.**
-
-Current development focus:
-
-> **Local species reference ingestion and taxonomic reconciliation**
-
----
-
-## Data and Privacy
-
-Project-specific reference data, raw BirdNET detections, and credentials are not committed to version control.
-
-The following directories are excluded:
-
-```text
-data/raw/
-data/reference/
-data/processed/
-```
-
-Environment variables and API credentials are also excluded through `.gitignore`.
-
-This keeps project data separate from the version-controlled codebase and documentation.
-
----
-
-## Evaluation Approach
-
-The framework will compare three approaches:
-
-1. **BirdNET confidence only**
-2. **Deterministic evidence-based screening**
-3. **Deterministic screening + AI contextual assessment**
-
-This allows the project to test whether AI adds meaningful value beyond transparent rule-based screening rather than assuming that it does.
-
----
-
-## Overall Goal
-
-The overall goal is to develop a **reproducible, human-in-the-loop workflow built around the existing BirdNET-Go–EarthRanger pipeline** that can:
-
-- combine taxonomic, local, geographic, temporal, and occurrence evidence for each detection;
-- identify unusual or potentially significant records that warrant further investigation;
-- use AI to interpret combined or conflicting evidence without treating AI as the final species validator;
-- assign an appropriate review priority and recommended next action;
-- record or enrich relevant detections in EarthRanger and notify human reviewers for further investigation and validation; and
-- use confirmed, quality-controlled detection outcomes to support longer-term monitoring, trend analysis, and conservation reporting.
-
-> **The system is intended to automate screening and prioritisation, not biological confirmation.**
+The intended evaluation compares BirdNET confidence alone, deterministic evidence-based screening, and screening with AI assistance using human-reviewed outcomes. AI value must be measured rather than assumed. Taxonomy establishes a reconciled name; audio and other evidence support a hypothesis; human review establishes the recorded validation outcome.
