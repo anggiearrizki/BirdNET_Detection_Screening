@@ -199,29 +199,6 @@ The supplied local result listing contains 86 accepted writebacks across all tes
 
 These counts are recording reviews, not new species counts or confirmation of species presence. They do not establish that the entire September-and-earlier backlog is complete. Nikoi detection 10712's note was also checked visually in BirdNET; its Gemini assessment remained uncertain.
 
-## Requirements arising from review feedback
-
-- Focus expensive screening on relevant new candidates and clarify property-wide versus station-history eligibility.
-- Continue September and earlier recordings and measure coverage explicitly.
-- Check the current Flora and Fauna list before manual additions. Include BirdNET URLs, acoustic-only provenance and identification uncertainty; do not describe records as visually observed.
-- Keep false-positive decisions human-confirmed until the status-update process is agreed.
-- Treat "ignore this species" as a separate decision affecting future detections, not as an individual-record rejection.
-- Preserve the Flora and Fauna platform as the source of truth.
-
-## Deployment discussion
-
-The local workflow automates a started batch. It is not yet deployed as a continuously operated service, and cloud/Cloudflare deployment access has not yet been established.
-
-Discuss the following with the infrastructure owner before selecting a deployment target:
-
-1. A runtime capable of running the existing Python code, or an agreed adaptation to the existing platform.
-2. Persistent storage and migration of station state, queues, reviews and attempt records so completed work is not repeated.
-3. Secure configuration for Gemini and separate BirdNET station credentials.
-4. Reliable unattended BirdNET authentication; current session-cookie failures remain a blocker.
-5. Deployment permissions, logs, automatic restart, monitoring and operational ownership.
-6. Network access to each station and external services, plus generation budget and processing limits.
-
-Cloudflare account access alone is not a deployment design. Confirm the execution and storage approach with Ollie before assuming the current watcher can run unchanged there.
 
 ## Remaining roadmap
 
