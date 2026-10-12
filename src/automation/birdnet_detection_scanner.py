@@ -199,7 +199,7 @@ def load_queue(queue_file):
 # Scanner
 # ---------------------------------------------------------------------
 def scan_detections(station, limit=200, bootstrap=False, max_pages=1000,
-                    since_id=None, recorded_since=None):
+                    since_id=None, recorded_since=None, recorded_before=None):
     if limit <= 0 or max_pages <= 0:
         raise ValueError("Page size and page limit must be positive.")
     config = get_station_config(station)
@@ -230,12 +230,12 @@ def scan_detections(station, limit=200, bootstrap=False, max_pages=1000,
     maximum = max([int(old or 0)] + [int(d["id"]) for d in detections])
     new = [] if bootstrap else [d for d in detections if int(d["id"]) > floor]
     candidates = new
-    if recorded_since is not None:
+    if recorded_since is not None or recorded_before is not None:
         if bootstrap:
             raise ValueError("A recent window cannot accompany bootstrap.")
-        from birdnet_recent_window import recording_time
+        from birdnet_recent_window import in_window
         # Backfill recent recordings even if an earlier baseline passed them.
-        candidates = [d for d in detections if recording_time(d) >= recorded_since]
+        candidates = [d for d in detections if in_window(d, recorded_since, recorded_before)]
     queued = {int(i["detection_id"]) for i in queue["detections"]}
     added = []
     for d in sorted(candidates, key=lambda r: int(r["id"])):

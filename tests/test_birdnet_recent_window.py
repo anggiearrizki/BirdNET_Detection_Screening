@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "automation"))
-from birdnet_recent_window import recording_time, recent_ids
+from birdnet_recent_window import recording_time, recent_ids, date_boundary
 
 class RecentWindowTests(unittest.TestCase):
     def test_offset_and_utc_equal(self):
@@ -15,6 +15,19 @@ class RecentWindowTests(unittest.TestCase):
         self.assertEqual(recent_ids(rows,datetime(2026,10,7,5,tzinfo=timezone.utc)),[1,9])
     def test_missing_time_fails(self):
         with self.assertRaises(ValueError): recording_time({"date":"2026-10-07"})
+    def test_before_date_excludes_october_boundary(self):
+        rows = [{"detection_id": 1, "timestamp": "2026-09-30T23:59:59+07:00"},
+                {"detection_id": 2, "timestamp": "2026-10-01T00:00:00+07:00"}]
+        self.assertEqual(recent_ids(rows, before=date_boundary("2026-10-01")), [1])
+
+    def test_bounded_window(self):
+        rows = [{"detection_id": i, "date": day, "time": "12:00:00"}
+                for i, day in enumerate(["2026-08-31", "2026-09-01", "2026-10-01"], 1)]
+        self.assertEqual(recent_ids(rows, date_boundary("2026-09-01"), date_boundary("2026-10-01")), [2])
+
+    def test_invalid_boundary(self):
+        with self.assertRaises(ValueError): date_boundary("2026-02-30")
+
     def test_empty_queue(self):
         self.assertEqual(recent_ids([],datetime.now(timezone.utc)),[])
 

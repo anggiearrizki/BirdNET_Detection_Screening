@@ -16,7 +16,17 @@ def recording_time(record):
         parsed = parsed.replace(tzinfo=STATION_TIMEZONE)
     return parsed.astimezone(timezone.utc)
 
-def recent_ids(records, cutoff):
+def date_boundary(value):
+    """Midnight at the stations, returned in UTC."""
+    from datetime import date
+    parsed = date.fromisoformat(value)
+    return datetime.combine(parsed, datetime.min.time(), STATION_TIMEZONE).astimezone(timezone.utc)
+
+def in_window(record, cutoff=None, before=None):
+    timestamp = recording_time(record)
+    return (cutoff is None or timestamp >= cutoff) and (before is None or timestamp < before)
+
+def recent_ids(records, cutoff=None, before=None):
     return [int(r["detection_id"]) for r in sorted(
-        (r for r in records if recording_time(r) >= cutoff),
+        (r for r in records if in_window(r, cutoff, before)),
         key=recording_time, reverse=True)]

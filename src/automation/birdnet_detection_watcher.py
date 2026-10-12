@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
-from birdnet_recent_window import recent_ids
+from birdnet_recent_window import recent_ids, date_boundary
 from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 AUTOMATION_DIR = Path(__file__).resolve().parent
@@ -152,6 +152,9 @@ def watch(args):
     items_handled = 0
     cutoff = (datetime.now(timezone.utc) - timedelta(days=args.recent_days)
               if args.recent_days else None)
+    before = date_boundary(args.before_date) if args.before_date else None
+    if cutoff is not None and before is not None and cutoff >= before:
+        raise ValueError("Recording window starts at or after its end.")
     print("=" * 72)
     print("BIRDNET AUTOMATED SCREENING WATCHER")
     print("=" * 72)
@@ -159,6 +162,7 @@ def watch(args):
     print("Property:", config["property"])
     print("BirdNET:", config["base_url"])
     print("Recording window starts:", cutoff.isoformat() if cutoff else "All queued recordings")
+    print("Recording window ends (exclusive):", before.isoformat() if before else "No upper bound")
     print("Gemini enabled:", args.run_gemini)
     print("Note posting enabled:", args.post_notes)
     print("Maximum review items for this entire run:", args.max_reviews)
@@ -176,6 +180,7 @@ def watch(args):
                     bootstrap=False,
                     max_pages=args.max_pages,
                     recorded_since=cutoff,
+                    recorded_before=before,
                 )
                 print_scan_summary(result)
             except requests.RequestException as exc:
@@ -183,10 +188,10 @@ def watch(args):
                 print("Existing queued work will still be processed.")
             sync_completion(station)
             selected_ids = None
-            if cutoff is not None:
+            if cutoff is not None or before is not None:
                 queue_path = get_worker_paths(station)["queue_file"]
-                selected_ids = recent_ids(read_json(queue_path)["detections"], cutoff)
-                print("Recent queued recordings:", len(selected_ids))
+                selected_ids = recent_ids(read_json(queue_path)["detections"], cutoff, before)
+                print("Queued recordings in window:", len(selected_ids))
             # Detect blocked posting records before downloading more audio.
             if args.run_gemini:
                 next_review_item(station, selected_ids)
@@ -274,6 +279,7 @@ def parse_args():
     )
     parser.add_argument("--station", required=True)
     parser.add_argument("--recent-days", type=positive_int, help="Backfill and process recordings from the last N days, newest first; preserve older work.")
+    parser.add_argument("--before-date", help="Backfill recordings before YYYY-MM-DD, exclusive midnight UTC+7; e.g. 2026-10-01 for September and earlier.")
     parser.add_argument("--max-pages", type=positive_int, default=1000)
     parser.add_argument("--station-credentials", action="store_true")
     parser.add_argument("--limit", type=positive_int, default=200)
@@ -287,6 +293,11 @@ def parse_args():
     parser.add_argument("--max-reviews", type=positive_int, default=1)
     parser.add_argument("--reviews-per-cycle", type=positive_int, default=1)
     args = parser.parse_args()
+    if args.before_date:
+        try:
+            date_boundary(args.before_date)
+        except ValueError:
+            parser.error("--before-date must be a valid YYYY-MM-DD date.")
     if args.run_gemini and not args.model:
         parser.error("--run-gemini requires --model.")
     if args.post_notes and not args.run_gemini:
