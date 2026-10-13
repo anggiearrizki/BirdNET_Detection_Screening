@@ -345,6 +345,7 @@ def resolve_candidate_taxonomy(
     # ---------------------------------------------------------------------
 
     return {
+        "classification": data.get("classification") or [],
         "input_scientific_name":
             scientific_name,
 

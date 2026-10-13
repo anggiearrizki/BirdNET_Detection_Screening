@@ -148,6 +148,12 @@ def sync_completion(station):
 def watch(args):
     config = get_station_config(args.station)
     station = config["station"]
+    candidate_plan = None
+    if args.candidate_plan:
+        from birdnet_candidate_plan import load_plan
+        candidate_plan = load_plan(args.candidate_plan, config)
+        if args.before_date != candidate_plan["before_date"] or args.recent_days:
+            raise ValueError("Use the candidate plan with its matching --before-date and no --recent-days.")
     cycle = 0
     items_handled = 0
     cutoff = (datetime.now(timezone.utc) - timedelta(days=args.recent_days)
@@ -192,6 +198,10 @@ def watch(args):
                 queue_path = get_worker_paths(station)["queue_file"]
                 selected_ids = recent_ids(read_json(queue_path)["detections"], cutoff, before)
                 print("Queued recordings in window:", len(selected_ids))
+            if candidate_plan is not None:
+                allowed = set(selected_ids or [])
+                selected_ids = [ident for ident in candidate_plan["selected_ids"] if ident in allowed]
+                print("Planned candidate recordings:", len(selected_ids))
             # Detect blocked posting records before downloading more audio.
             if args.run_gemini:
                 next_review_item(station, selected_ids)
@@ -278,6 +288,7 @@ def parse_args():
         description="Scan, prepare, review, and optionally post BirdNET notes."
     )
     parser.add_argument("--station", required=True)
+    parser.add_argument("--candidate-plan", help="Process only the station-specific candidate plan IDs.")
     parser.add_argument("--recent-days", type=positive_int, help="Backfill and process recordings from the last N days, newest first; preserve older work.")
     parser.add_argument("--before-date", help="Backfill recordings before YYYY-MM-DD, exclusive midnight UTC+7; e.g. 2026-10-01 for September and earlier.")
     parser.add_argument("--max-pages", type=positive_int, default=1000)
